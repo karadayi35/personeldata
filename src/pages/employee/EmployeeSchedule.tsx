@@ -32,18 +32,22 @@ export default function EmployeeSchedule() {
   const [assignments, setAssignments] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
   const [overrides, setOverrides] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
 
     const fetchData = async () => {
       setLoading(true);
+      setError(null);
       try {
         // First find the employee document
         const qEmp = query(collection(db, 'employees'), where('authUid', '==', user.uid));
         const snapEmp = await getDocs(qEmp);
         
         if (snapEmp.empty) {
+          console.warn("Employee record not found for UID:", user.uid);
+          setError("Personel kaydınız bulunamadı.");
           setLoading(false);
           return;
         }
@@ -63,8 +67,9 @@ export default function EmployeeSchedule() {
         const qOver = query(collection(db, 'shift_overrides'), where('employeeId', '==', user.uid));
         const snapOver = await getDocs(qOver);
         setOverrides(snapOver.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (error) {
-        console.error('Error fetching schedule:', error);
+      } catch (err: any) {
+        console.error('Error fetching schedule:', err);
+        setError(`Çalışma planı yüklenirken hata oluştu: ${err.message}`);
       } finally {
         setLoading(false);
       }
@@ -102,6 +107,33 @@ export default function EmployeeSchedule() {
   };
 
   const todayPlan = getDayPlan(new Date());
+
+  if (loading) {
+    return (
+      <div className="flex flex-col justify-center items-center h-[60vh] gap-4">
+        <Loader2 className="animate-spin text-whatsapp-600" size={32} />
+        <p className="text-slate-400 text-sm">Plan yükleniyor...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] p-8 text-center">
+        <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
+          <AlertCircle className="text-red-500" size={32} />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800 mb-2">Hata Oluştu</h3>
+        <p className="text-slate-500 mb-6">{error}</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="w-full py-3 bg-whatsapp-600 text-white rounded-xl font-bold"
+        >
+          Tekrar Dene
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="px-4 py-6 space-y-6">

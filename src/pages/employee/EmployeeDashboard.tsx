@@ -67,6 +67,7 @@ export default function EmployeeDashboard() {
     const q = query(collection(db, 'employees'), where('authUid', '==', user.uid));
     const unsubEmp = onSnapshot(q, 
       (snapshot) => {
+        console.log("Employee snapshot received. Empty:", snapshot.empty);
         if (!snapshot.empty) {
           const docSnap = snapshot.docs[0];
           const data = docSnap.data();
@@ -81,17 +82,19 @@ export default function EmployeeDashboard() {
               },
               (error) => {
                 console.error("Branch data fetch error:", error);
+                setError(`Şube verisi alınamadı: ${error.message}`);
               }
             );
           }
         } else {
-          console.warn("No employee record found for this user.");
+          console.warn("No employee record found for this user UID:", user.uid);
+          setError("Personel kaydınız sistemde bulunamadı. Lütfen yöneticinizle iletişime geçin.");
           setLoading(false);
         }
       },
       (error) => {
         console.error("Employee data fetch error:", error);
-        setError("Personel verisi alınamadı. Lütfen internet bağlantınızı kontrol edin.");
+        setError(`Personel verisi alınamadı: ${error.message} (Koleksiyon: employees)`);
         setLoading(false);
       }
     );
@@ -99,10 +102,10 @@ export default function EmployeeDashboard() {
     // Safety timeout for initial load
     const timeout = setTimeout(() => {
       if (loading) {
-        console.warn("Loading timed out after 10 seconds");
-        setLoading(false);
+        console.warn("Loading timed out after 10 seconds. Current state:", { hasUser: !!user, hasEmployeeData: !!employeeData });
         if (!employeeData) {
-          setError("Veriler yüklenemedi. Sayfayı yenilemeyi deneyin.");
+          setLoading(false);
+          setError("Veriler yüklenemedi (Zaman Aşımı). Lütfen internet bağlantınızı ve yetkilerinizi kontrol edip sayfayı yenileyin.");
         }
       }
     }, 10000);

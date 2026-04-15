@@ -27,35 +27,52 @@ export default function EmployeeRecords() {
   const [user] = useState(auth.currentUser);
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
 
     const fetchRecords = async () => {
-      // First find the employee document
-      const qEmp = query(collection(db, 'employees'), where('authUid', '==', user.uid));
-      const snapEmp = await getDocs(qEmp);
-      
-      if (snapEmp.empty) {
+      try {
+        setLoading(true);
+        // First find the employee document
+        const qEmp = query(collection(db, 'employees'), where('authUid', '==', user.uid));
+        const snapEmp = await getDocs(qEmp);
+        
+        if (snapEmp.empty) {
+          console.warn("Employee record not found for UID:", user.uid);
+          setError("Personel kaydınız bulunamadı.");
+          setLoading(false);
+          return;
+        }
+
+        const employeeId = snapEmp.docs[0].id;
+
+        const q = query(
+          collection(db, 'attendance_records'),
+          where('employeeId', '==', employeeId),
+          orderBy('createdAt', 'desc'),
+          limit(20)
+        );
+
+        const unsub = onSnapshot(q, 
+          (snapshot) => {
+            setRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setLoading(false);
+          },
+          (err) => {
+            console.error("Attendance records fetch error:", err);
+            setError(`Kayıtlar yüklenirken hata oluştu: ${err.message}`);
+            setLoading(false);
+          }
+        );
+
+        return unsub;
+      } catch (err: any) {
+        console.error("fetchRecords error:", err);
+        setError(`Sistem hatası: ${err.message}`);
         setLoading(false);
-        return;
       }
-
-      const employeeId = snapEmp.docs[0].id;
-
-      const q = query(
-        collection(db, 'attendance_records'),
-        where('employeeId', '==', employeeId),
-        orderBy('createdAt', 'desc'),
-        limit(20)
-      );
-
-      const unsub = onSnapshot(q, (snapshot) => {
-        setRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        setLoading(false);
-      });
-
-      return unsub;
     };
 
     let unsub: any;
@@ -66,8 +83,27 @@ export default function EmployeeRecords() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-[60vh]">
-        <Loader2 className="animate-spin text-whatsapp-600" />
+      <div className="flex flex-col justify-center items-center h-[60vh] gap-4">
+        <Loader2 className="animate-spin text-whatsapp-600" size={32} />
+        <p className="text-slate-400 text-sm">Kayıtlar yükleniyor...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] p-8 text-center">
+        <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
+          <Clock className="text-red-500" size={32} />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800 mb-2">Hata Oluştu</h3>
+        <p className="text-slate-500 mb-6">{error}</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="w-full py-3 bg-whatsapp-600 text-white rounded-xl font-bold"
+        >
+          Tekrar Dene
+        </button>
       </div>
     );
   }
