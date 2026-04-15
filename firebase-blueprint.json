@@ -178,6 +178,19 @@
         "isExcluded": { "type": "boolean" }
       },
       "required": ["employeeId", "branchBreakId", "date"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Sistem kullanıcısı",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "employee"] },
+        "employeeId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
     }
   },
   "firestore": {
@@ -224,6 +237,10 @@
     "employee_break_overrides": {
       "schema": "EmployeeBreakOverride",
       "description": "Personel bazlı mola istisnaları"
+    },
+    "users": {
+      "schema": "User",
+      "description": "Sistem kullanıcıları ve rolleri"
     }
   }
 }

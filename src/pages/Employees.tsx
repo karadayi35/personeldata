@@ -27,7 +27,8 @@ import {
   orderBy,
   updateDoc,
   deleteDoc,
-  doc
+  doc,
+  setDoc
 } from 'firebase/firestore';
 import { 
   Key,
@@ -193,7 +194,15 @@ export default function Employees() {
             })
           });
           
-          const authData = await authResponse.json();
+          let authData;
+          const responseText = await authResponse.text();
+          try {
+            authData = JSON.parse(responseText);
+          } catch (e) {
+            console.error('Failed to parse auth response as JSON:', responseText);
+            throw new Error('Sunucudan geçersiz yanıt alındı. Lütfen sistem yöneticisine başvurun.');
+          }
+
           if (authResponse.ok) {
             authUid = authData.uid;
           } else {
@@ -202,7 +211,7 @@ export default function Employees() {
             if (authData.error?.includes('email address is already in use')) {
               throw new Error('Bu e-posta adresi ile zaten bir kullanıcı mevcut. Lütfen farklı bir e-posta kullanın.');
             }
-            throw new Error('Mobil hesap oluşturulamadı: ' + authData.error);
+            throw new Error('Mobil hesap oluşturulamadı: ' + (authData.error || 'Bilinmeyen hata'));
           }
         } catch (e: any) {
           console.error('Auth API call error:', e);
@@ -218,6 +227,17 @@ export default function Employees() {
         mobileAccountCreated: !!authUid,
         createdAt: serverTimestamp()
       });
+
+      // 2.5 Create user record in 'users' collection for RBAC if authUid exists
+      if (authUid) {
+        await setDoc(doc(db, 'users', authUid), {
+          uid: authUid,
+          email: formData.email,
+          role: 'employee', // Default role for employees
+          employeeId: docRef.id,
+          createdAt: new Date().toISOString()
+        });
+      }
 
       // 3. Send real email via backend
       const emailSent = await sendRealEmail(formData.email, formData.name, currentPassword);
@@ -272,7 +292,7 @@ export default function Employees() {
     try {
       // 1. Update Auth status if changed
       if (editingEmployee.authUid) {
-        await fetch('/api/update-user-status', {
+        const response = await fetch('/api/update-user-status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -280,6 +300,11 @@ export default function Employees() {
             disabled: formData.status === 'inactive'
           })
         });
+
+        if (!response.ok) {
+          const text = await response.text();
+          console.error('Update user status failed:', text);
+        }
       }
 
       // 2. Update Firestore
@@ -304,11 +329,16 @@ export default function Employees() {
     try {
       // 1. Delete Auth user via backend
       if (deletingEmployee.authUid) {
-        await fetch('/api/delete-user', {
+        const response = await fetch('/api/delete-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ uid: deletingEmployee.authUid })
         });
+
+        if (!response.ok) {
+          const text = await response.text();
+          console.error('Delete user failed:', text);
+        }
       }
 
       // 2. Delete Firestore document
@@ -336,7 +366,7 @@ export default function Employees() {
     try {
       // 1. Revoke Auth tokens if exists
       if (emp.authUid) {
-        await fetch('/api/update-user-status', {
+        const response = await fetch('/api/update-user-status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -344,6 +374,11 @@ export default function Employees() {
             disabled: emp.status === 'inactive'
           })
         });
+
+        if (!response.ok) {
+          const text = await response.text();
+          console.error('Reset password status update failed:', text);
+        }
       }
 
       // 2. Update Firestore
@@ -408,7 +443,15 @@ export default function Employees() {
         })
       });
       
-      const authData = await authResponse.json();
+      let authData;
+      const responseText = await authResponse.text();
+      try {
+        authData = JSON.parse(responseText);
+      } catch (e) {
+        console.error('Failed to parse auth response as JSON:', responseText);
+        throw new Error('Sunucudan geçersiz yanıt alındı.');
+      }
+
       if (!authResponse.ok) {
         throw new Error(authData.error || 'Auth hesabı oluşturulamadı.');
       }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { auth, db } from './firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
 import AdminLayout from './layouts/AdminLayout';
@@ -42,29 +42,36 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
+    const unsubAuth = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       if (user) {
-        const unsubData = onSnapshot(doc(db, 'users', user.uid), 
-          (docSnap) => {
+        const userRef = doc(db, 'users', user.uid);
+        const unsubData = onSnapshot(userRef, 
+          async (docSnap) => {
             if (docSnap.exists()) {
               setUserData(docSnap.data());
+              setLoading(false);
+            } else {
+              // Create user record if missing
+              const isDefaultAdmin = user.email === 'aalikirmizigul89@gmail.com';
+              const defaultData = {
+                uid: user.uid,
+                email: user.email,
+                role: isDefaultAdmin ? 'admin' : 'employee',
+                createdAt: new Date().toISOString()
+              };
+              await setDoc(userRef, defaultData);
+              setUserData(defaultData);
+              setLoading(false);
             }
-            setLoading(false);
           },
           (error) => {
             console.error("User data fetch error:", error);
-            setLoading(false); // Stop loading even on error
+            setLoading(false);
           }
         );
         
-        // Safety timeout: if data doesn't load in 5 seconds, stop loading
-        const timeout = setTimeout(() => setLoading(false), 5000);
-        
-        return () => {
-          unsubData();
-          clearTimeout(timeout);
-        };
+        return () => unsubData();
       } else {
         setUserData(null);
         setLoading(false);
