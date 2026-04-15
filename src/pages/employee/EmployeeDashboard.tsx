@@ -9,7 +9,8 @@ import {
   ChevronRight,
   Loader2,
   ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { auth, db } from '@/firebase';
@@ -46,6 +47,14 @@ export default function EmployeeDashboard() {
   const [qrAction, setQrAction] = useState<'check-in' | 'check-out' | null>(null);
   const [recentRecords, setRecentRecords] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
@@ -148,6 +157,7 @@ export default function EmployeeDashboard() {
       },
       (error) => {
         console.error("Status fetch error:", error);
+        setNotification({ type: 'error', message: `Durum bilgisi alınamadı: ${error.message}` });
         setLoading(false);
       }
     );
@@ -166,6 +176,7 @@ export default function EmployeeDashboard() {
       },
       (error) => {
         console.error("Recent records fetch error:", error);
+        // Don't show notification for recent records to avoid spamming
       }
     );
 
@@ -224,9 +235,18 @@ export default function EmployeeDashboard() {
     // Verify if the scanned QR code matches the branch ID
     console.log('QR Scanned:', decodedText);
     
+    if (!branchData) {
+      setNotification({ type: 'error', message: 'Hata: Şube verisi yüklenemedi. Lütfen sayfayı yenileyin.' });
+      closeScanner();
+      return;
+    }
+
     // The QR code should contain the branch ID
-    if (branchData && decodedText !== branchData.id) {
-      alert('Hata: Yanlış şube QR kodu! Lütfen kendi şubenizin kodunu okutun.');
+    // Extract ID if it's a URL or just the ID
+    const scannedId = decodedText.includes('/') ? decodedText.split('/').pop() : decodedText;
+
+    if (scannedId !== branchData.id) {
+      setNotification({ type: 'error', message: 'Hata: Yanlış şube QR kodu! Lütfen kendi şubenizin kodunu okutun.' });
       closeScanner();
       return;
     }
@@ -237,11 +257,18 @@ export default function EmployeeDashboard() {
       processCheckOut();
     }
     
+    if (navigator.vibrate) {
+      navigator.vibrate(200);
+    }
+    
     closeScanner();
   };
 
   const processCheckIn = async () => {
-    if (!branchData) return;
+    if (!branchData || !employeeData) {
+      setNotification({ type: 'error', message: 'Hata: Personel veya şube verisi eksik.' });
+      return;
+    }
     setActionLoading(true);
     try {
       // Get real location
@@ -260,7 +287,10 @@ export default function EmployeeDashboard() {
       let allowedRadius = branchData.radius || 100;
       
       if (distance > allowedRadius) {
-        alert(`Hata: Şube kapsama alanı dışındasınız. (${Math.round(distance)}m)\nİzin verilen: ${allowedRadius}m`);
+        setNotification({ 
+          type: 'error', 
+          message: `Hata: Şube kapsama alanı dışındasınız. (${Math.round(distance)}m) İzin verilen: ${allowedRadius}m` 
+        });
         setActionLoading(false);
         return;
       }
@@ -285,21 +315,26 @@ export default function EmployeeDashboard() {
         createdAt: serverTimestamp()
       });
       
-      alert('Giriş başarılı!');
+      setNotification({ type: 'success', message: 'Giriş başarılı! İyi çalışmalar.' });
     } catch (error: any) {
       console.error('Check-in error:', error);
+      let msg = 'Giriş işlemi başarısız oldu.';
       if (error.code === 1) {
-        alert('Hata: Konum izni reddedildi. Lütfen tarayıcı ayarlarından konum izni verin.');
-      } else {
-        alert('Hata: ' + error.message);
+        msg = 'Hata: Konum izni reddedildi. Lütfen tarayıcı ayarlarından konum izni verin.';
+      } else if (error.message) {
+        msg = `Hata: ${error.message}`;
       }
+      setNotification({ type: 'error', message: msg });
     } finally {
       setActionLoading(false);
     }
   };
 
   const processCheckOut = async () => {
-    if (!currentRecordId) return;
+    if (!currentRecordId) {
+      setNotification({ type: 'error', message: 'Hata: Aktif çalışma kaydı bulunamadı.' });
+      return;
+    }
     setActionLoading(true);
     try {
       const docRef = doc(db, 'attendance_records', currentRecordId);
@@ -308,15 +343,25 @@ export default function EmployeeDashboard() {
         status: 'completed',
         updatedAt: serverTimestamp()
       });
-      alert('Çıkış başarılı!');
+      setNotification({ type: 'success', message: 'Çıkış başarılı! İyi dinlenmeler.' });
     } catch (error: any) {
-      alert('Hata: ' + error.message);
+      console.error('Check-out error:', error);
+      setNotification({ type: 'error', message: `Çıkış hatası: ${error.message}` });
     } finally {
       setActionLoading(false);
     }
   };
 
   const startScanner = (action: 'check-in' | 'check-out') => {
+    if (!employeeData) {
+      setNotification({ type: 'error', message: 'Hata: Personel verisi henüz yüklenmedi.' });
+      return;
+    }
+    if (!branchData) {
+      setNotification({ type: 'error', message: 'Hata: Şube verisi bulunamadı. Lütfen yöneticinizle iletişime geçin.' });
+      return;
+    }
+
     setQrAction(action);
     setIsQRScannerOpen(true);
     
@@ -591,6 +636,31 @@ export default function EmployeeDashboard() {
                 className="w-full py-4 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-bold transition-colors"
               >
                 Vazgeç
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Notification Toast */}
+      <AnimatePresence>
+        {notification && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-24 left-4 right-4 z-[110]"
+          >
+            <div className={cn(
+              "p-4 rounded-2xl shadow-2xl border flex items-center gap-3",
+              notification.type === 'success' 
+                ? "bg-whatsapp-600 border-whatsapp-500 text-white" 
+                : "bg-red-600 border-red-500 text-white"
+            )}>
+              {notification.type === 'success' ? <ShieldCheck size={20} /> : <AlertCircle size={20} />}
+              <p className="text-sm font-bold flex-1">{notification.message}</p>
+              <button onClick={() => setNotification(null)} className="p-1 hover:bg-white/10 rounded-lg">
+                <X size={16} />
               </button>
             </div>
           </motion.div>
