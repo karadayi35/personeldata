@@ -329,7 +329,43 @@ export default function EmployeeDashboard() {
     }
   };
 
+  const handleTestAttendanceWrite = async () => {
+    alert("Test attendance yazısı başlatıldı");
+    if (!employeeData || !branchData) {
+      alert("Hata: Employee veya Branch verisi eksik. Önce verilerin yüklenmesini bekleyin.");
+      return;
+    }
+
+    try {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      alert("Test kaydı Firestore'a yazılmak üzere hazırlanıyor...");
+      
+      const docRef = await addDoc(collection(db, 'attendance_records'), {
+        employeeId: employeeData.id,
+        employeeName: employeeData.name || '',
+        authUid: user?.uid || null,
+        branchId: branchData.id,
+        branchName: branchData.name || '',
+        date: todayStr,
+        checkIn: serverTimestamp(),
+        checkOut: null,
+        method: 'TEST',
+        status: 'working',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      
+      alert("SUCCESS: attendance kaydı oluşturuldu! ID: " + docRef.id);
+      setNotification({ type: 'success', message: 'Test kaydı başarıyla oluşturuldu.' });
+    } catch (error: any) {
+      console.error("Test write error:", error);
+      alert("attendance write hatası: " + error.message);
+      setNotification({ type: 'error', message: "Test yazma hatası: " + error.message });
+    }
+  };
+
   const processCheckIn = async () => {
+    alert("processCheckIn başladı");
     setNotification({ type: 'success', message: 'DEBUG: processCheckIn başladı' });
     console.log('DEBUG: processCheckIn started');
 
@@ -390,6 +426,7 @@ export default function EmployeeDashboard() {
 
       setNotification({ type: 'success', message: 'DEBUG: attendance kaydı yazılıyor' });
       console.log('DEBUG: attendance kaydı yazılıyor to attendance_records');
+      alert("attendance yazılıyor");
 
       let docRef;
       try {
@@ -413,6 +450,7 @@ export default function EmployeeDashboard() {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
+        alert("attendance yazıldı");
         setNotification({ type: 'success', message: 'DEBUG: attendance kaydı oluşturuldu' });
         console.log('DEBUG: attendance kaydı oluşturuldu, ID:', docRef.id);
       } catch (firestoreError: any) {
@@ -678,6 +716,17 @@ export default function EmployeeDashboard() {
 
   return (
     <div className="px-4 py-6 space-y-6">
+      {/* Test Button Section */}
+      <div className="p-4 bg-orange-50 border border-orange-200 rounded-3xl flex flex-col gap-2">
+        <p className="text-[10px] font-bold text-orange-600 uppercase tracking-widest text-center">DEBUG MOD: TEST ALANI</p>
+        <button
+          onClick={handleTestAttendanceWrite}
+          className="w-full py-3 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-600/20 active:scale-95 transition-transform"
+        >
+          TEST ATTENDANCE YAZ
+        </button>
+      </div>
+
       <div className="relative overflow-hidden bg-gradient-to-br from-whatsapp-500 to-whatsapp-600 rounded-[2.5rem] p-8 text-white shadow-xl shadow-whatsapp-600/20">
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" />
         <div className="relative z-10 space-y-6">
