@@ -13,7 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { auth, db } from '@/firebase';
+import { auth, db, handleFirestoreError, OperationType } from '@/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection,
@@ -54,9 +54,6 @@ type BranchData = {
   lat?: number;
   lng?: number;
   radius?: number;
-  qrCode?: string;
-  code?: string;
-  branchCode?: string;
   [key: string]: any;
 } | null;
 
@@ -97,21 +94,15 @@ export default function EmployeeDashboard() {
   const branchUnsubscribeRef = useRef<(() => void) | null>(null);
   const scanLockRef = useRef(false);
 
-  const showNotification = (type: 'success' | 'error', message: string) => {
-    console.log(`[${type.toUpperCase()}]`, message);
-    setNotification({ type, message });
-  };
-
   useEffect(() => {
     if (!notification) return;
-    const timer = setTimeout(() => setNotification(null), 4500);
+    const timer = setTimeout(() => setNotification(null), 4000);
     return () => clearTimeout(timer);
   }, [notification]);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-
       if (!currentUser) {
         setEmployeeData(null);
         setBranchData(null);
@@ -165,9 +156,7 @@ export default function EmployeeDashboard() {
             doc(db, 'branches', data.branchId),
             (branchSnap) => {
               if (branchSnap.exists()) {
-                const bData = { id: branchSnap.id, ...branchSnap.data() };
-                setBranchData(bData);
-                console.log('BRANCH DATA LOADED:', bData);
+                setBranchData({ id: branchSnap.id, ...branchSnap.data() });
               } else {
                 setBranchData(null);
               }
@@ -238,7 +227,7 @@ export default function EmployeeDashboard() {
       (statusError) => {
         console.error('Status fetch error:', statusError);
         setLoading(false);
-        showNotification('error', `Durum bilgisi alınamadı: ${statusError.message}`);
+        setNotification({ type: 'error', message: `Durum bilgisi alınamadı: ${statusError.message}` });
       }
     );
 
@@ -325,21 +314,6 @@ export default function EmployeeDashboard() {
     return R * c;
   };
 
-  const normalizeQrValue = (value: string) => {
-    const raw = value.trim();
-
-    try {
-      const url = new URL(raw);
-      const fromQuery = url.searchParams.get('branchId');
-      if (fromQuery) return fromQuery.trim();
-
-      const pathnameLast = url.pathname.split('/').filter(Boolean).pop();
-      return pathnameLast?.trim() || raw;
-    } catch {
-      return raw;
-    }
-  };
-
   const closeScanner = async () => {
     try {
       if (html5QrCodeRef.current?.isScanning) {
@@ -356,19 +330,22 @@ export default function EmployeeDashboard() {
   };
 
   const processCheckIn = async () => {
+    setNotification({ type: 'success', message: 'DEBUG: processCheckIn başladı' });
+    console.log('DEBUG: processCheckIn started');
+
     if (!branchData || !employeeData) {
-      showNotification('error', 'Hata: Personel veya şube verisi eksik.');
+      setNotification({ type: 'error', message: 'Hata: Personel veya şube verisi eksik.' });
       return;
     }
 
     setActionLoading(true);
 
     try {
-      showNotification('success', 'Konum doğrulanıyor...');
-
+      // Use lastPosition if available, otherwise fetch again
       let position = lastPosition;
 
       if (!position) {
+        setNotification({ type: 'success', message: 'DEBUG: Konum yeniden isteniyor...' });
         position = await new Promise<GeolocationPosition>((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
             enableHighAccuracy: true,
@@ -380,63 +357,81 @@ export default function EmployeeDashboard() {
 
       const { latitude, longitude } = position.coords;
 
-      if (typeof branchData.lat !== 'number' || typeof branchData.lng !== 'number') {
-        showNotification('error', 'Şube konum bilgileri eksik.');
+      if (
+        typeof branchData.lat !== 'number' ||
+        typeof branchData.lng !== 'number'
+      ) {
+        setNotification({ type: 'error', message: 'Şube konum bilgileri eksik.' });
         return;
       }
 
       const distance = calculateDistance(latitude, longitude, branchData.lat, branchData.lng);
       const allowedRadius = branchData.radius || 100;
 
-      console.log('CHECK-IN DEBUG', {
+      console.log('DEBUG Check-in:', {
         branchId: branchData.id,
-        branchLat: branchData.lat,
-        branchLng: branchData.lng,
-        userLat: latitude,
-        userLng: longitude,
         distance,
         allowedRadius,
+        latitude,
+        longitude
       });
 
       if (distance > allowedRadius) {
-        showNotification(
-          'error',
-          `Hata: Şube kapsama alanı dışındasınız. (${Math.round(distance)}m) İzin verilen: ${allowedRadius}m`
-        );
+        setNotification({
+          type: 'error',
+          message: `Hata: Şube kapsama alanı dışındasınız. (${Math.round(distance)}m) İzin verilen: ${allowedRadius}m`,
+        });
         return;
       }
 
-      showNotification('success', 'Kayıt Firestore’a yazılıyor...');
+      setNotification({ type: 'success', message: 'DEBUG: Konum doğrulandı' });
 
       const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-      const docRef = await addDoc(collection(db, 'attendance_records'), {
-        employeeId: employeeData.id,
-        employeeName: employeeData.name || '',
-        authUid: user?.uid || null,
-        branchId: branchData.id,
-        branchName: branchData.name || '',
-        date: todayStr,
-        checkIn: serverTimestamp(),
-        checkOut: null,
-        method: 'QR',
-        location: {
-          lat: latitude,
-          lng: longitude,
-          isWithinRadius: true,
-          distance: Math.round(distance),
-        },
-        status: 'working',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      setNotification({ type: 'success', message: 'DEBUG: attendance kaydı yazılıyor' });
+      console.log('DEBUG: attendance kaydı yazılıyor to attendance_records');
 
-      console.log('ATTENDANCE RECORD CREATED:', docRef.id);
+      let docRef;
+      try {
+        docRef = await addDoc(collection(db, 'attendance_records'), {
+          employeeId: employeeData.id,
+          employeeName: employeeData.name || '',
+          authUid: user?.uid || null,
+          branchId: branchData.id,
+          branchName: branchData.name || '',
+          date: todayStr,
+          checkIn: serverTimestamp(),
+          checkOut: null,
+          method: 'QR',
+          location: {
+            lat: latitude,
+            lng: longitude,
+            isWithinRadius: true,
+            distance: Math.round(distance),
+          },
+          status: 'working',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        setNotification({ type: 'success', message: 'DEBUG: attendance kaydı oluşturuldu' });
+        console.log('DEBUG: attendance kaydı oluşturuldu, ID:', docRef.id);
+      } catch (firestoreError: any) {
+        console.error('CRITICAL: Firestore write hatası:', firestoreError);
+        setNotification({ 
+          type: 'error', 
+          message: `Firestore write hatası: ${firestoreError.message || 'Yetki hatası veya ağ sorunu'}` 
+        });
+        handleFirestoreError(firestoreError, OperationType.CREATE, 'attendance_records');
+        return;
+      }
 
       setStatus('working');
       setCurrentRecordId(docRef.id);
 
-      showNotification('success', 'Giriş başarılı! İyi çalışmalar.');
+      setNotification({
+        type: 'success',
+        message: 'Giriş başarılı! İyi çalışmalar.',
+      });
 
       setTimeout(() => {
         navigate('/mobile/records');
@@ -444,53 +439,69 @@ export default function EmployeeDashboard() {
     } catch (checkInError: any) {
       console.error('Check-in error:', checkInError);
 
-      let msg = 'Giriş işlemi başarısız oldu.';
+      let msg = `Giriş işlemi başarısız oldu. (Kod: ${checkInError?.code || 'vok'}, Mesaj: ${checkInError?.message || 'vok'})`;
       if (checkInError?.code === 1) {
-        msg = 'Hata: Konum izni reddedildi. Lütfen tarayıcı ayarlarından konum izni verin.';
+        msg = `Konum hatası: code 1. Lütfen tarayıcı ayarlarından konum izni verin.`;
       } else if (checkInError?.code === 2) {
-        msg = 'Hata: Konum alınamadı. Lütfen tekrar deneyin.';
+        msg = `Konum hatası: code 2. Konum alınamadı.`;
       } else if (checkInError?.code === 3) {
-        msg = 'Hata: Konum alma zaman aşımına uğradı.';
-      } else if (checkInError?.message) {
-        msg = `Hata: ${checkInError.message}`;
+        msg = `Konum hatası: code 3. Konum alma zaman aşımına uğradı.`;
       }
 
-      showNotification('error', msg);
+      setNotification({ type: 'error', message: msg });
     } finally {
       setActionLoading(false);
     }
   };
 
   const processCheckOut = async () => {
+    setNotification({ type: 'success', message: 'DEBUG: processCheckOut başladı' });
     if (!currentRecordId) {
-      showNotification('error', 'Hata: Aktif çalışma kaydı bulunamadı.');
+      setNotification({ type: 'error', message: 'Hata: Aktif çalışma kaydı bulunamadı.' });
       return;
     }
 
     setActionLoading(true);
 
     try {
-      showNotification('success', 'Çıkış kaydı işleniyor...');
-
       const docRef = doc(db, 'attendance_records', currentRecordId);
 
-      await updateDoc(docRef, {
-        checkOut: serverTimestamp(),
-        status: 'completed',
-        updatedAt: serverTimestamp(),
-      });
+      setNotification({ type: 'success', message: 'DEBUG: attendance kaydı güncelleniyor' });
+      
+      try {
+        await updateDoc(docRef, {
+          checkOut: serverTimestamp(),
+          status: 'completed',
+          updatedAt: serverTimestamp(),
+        });
+        setNotification({ type: 'success', message: 'DEBUG: attendance kaydı güncellendi' });
+      } catch (firestoreError: any) {
+        console.error('CRITICAL: Firestore update hatası:', firestoreError);
+        setNotification({ 
+          type: 'error', 
+          message: `Firestore update hatası: ${firestoreError.message || 'Yetki hatası veya ağ sorunu'}` 
+        });
+        handleFirestoreError(firestoreError, OperationType.UPDATE, `attendance_records/${currentRecordId}`);
+        return;
+      }
 
       setStatus('idle');
       setCurrentRecordId(null);
 
-      showNotification('success', 'Çıkış başarılı! İyi dinlenmeler.');
+      setNotification({
+        type: 'success',
+        message: 'Çıkış başarılı! İyi dinlenmeler.',
+      });
 
       setTimeout(() => {
         navigate('/mobile/records');
       }, 1200);
     } catch (checkOutError: any) {
       console.error('Check-out error:', checkOutError);
-      showNotification('error', `Çıkış hatası: ${checkOutError.message || 'İşlem başarısız oldu.'}`);
+      setNotification({
+        type: 'error',
+        message: `Çıkış hatası: ${checkOutError.message || 'İşlem başarısız oldu.'}`,
+      });
     } finally {
       setActionLoading(false);
     }
@@ -500,82 +511,79 @@ export default function EmployeeDashboard() {
     if (scanLockRef.current) return;
     scanLockRef.current = true;
 
-    try {
-      console.log('QR Scanned RAW:', decodedText);
-      showNotification('success', 'QR okundu');
+    console.log('DEBUG QR Scan:', {
+      branchId: branchData?.id,
+      decodedText
+    });
+    setNotification({ type: 'success', message: 'DEBUG: QR okundu' });
 
-      if (!branchData) {
-        showNotification('error', 'Hata: Şube verisi yüklenemedi. Lütfen sayfayı yenileyin.');
-        await closeScanner();
-        return;
-      }
-
-      const scannedId = normalizeQrValue(decodedText);
-
-      const validValues = [
-        branchData.id,
-        branchData.qrCode,
-        branchData.code,
-        branchData.branchCode,
-      ]
-        .filter(Boolean)
-        .map((v) => String(v).trim());
-
-      console.log('QR VALIDATION DEBUG', {
-        raw: decodedText,
-        scannedId,
-        validValues,
-        qrAction,
-      });
-
-      if (!validValues.includes(scannedId)) {
-        showNotification(
-          'error',
-          `Yanlış şube QR kodu. Okunan: ${scannedId}`
-        );
-        await closeScanner();
-        return;
-      }
-
-      showNotification('success', 'QR doğrulandı, işlem başlatılıyor...');
-
-      if (navigator.vibrate) {
-        navigator.vibrate(200);
-      }
-
+    if (!branchData) {
+      setNotification({ type: 'error', message: 'Hata: Şube verisi yüklenemedi. Lütfen sayfayı yenileyin.' });
       await closeScanner();
+      scanLockRef.current = false;
+      return;
+    }
 
-      if (qrAction === 'check-in') {
-        await processCheckIn();
-      } else if (qrAction === 'check-out') {
-        await processCheckOut();
-      }
-    } catch (scanError: any) {
-      console.error('QR handle error:', scanError);
-      showNotification('error', `QR işleme hatası: ${scanError.message || 'Bilinmeyen hata'}`);
-    } finally {
+    const scannedId = decodedText.includes('/')
+      ? decodedText.split('/').filter(Boolean).pop()
+      : decodedText.trim();
+
+    console.log('DEBUG QR Parse:', { scannedId });
+
+    if (scannedId !== branchData.id) {
+      setNotification({
+        type: 'error',
+        message: `Hata: Yanlış şube QR kodu! (Okunan: ${scannedId}, Beklenen: ${branchData.id})`,
+      });
+      await closeScanner();
       setTimeout(() => {
         scanLockRef.current = false;
       }, 1500);
+      return;
     }
+
+    setNotification({
+      type: 'success',
+      message: 'DEBUG: QR doğrulandı, işlem başlatılıyor...',
+    });
+
+    if (navigator.vibrate) {
+      navigator.vibrate(200);
+    }
+
+    await closeScanner();
+
+    if (qrAction === 'check-in') {
+      setNotification({ type: 'success', message: 'DEBUG: Check-in işlemi başlatılıyor' });
+      await processCheckIn();
+    } else if (qrAction === 'check-out') {
+      setNotification({ type: 'success', message: 'DEBUG: Check-out işlemi başlatılıyor' });
+      await processCheckOut();
+    }
+
+    setTimeout(() => {
+      scanLockRef.current = false;
+    }, 1500);
   };
 
   const startScanner = async (action: 'check-in' | 'check-out') => {
     if (!employeeData) {
-      showNotification('error', 'Hata: Personel verisi henüz yüklenmedi.');
+      setNotification({ type: 'error', message: 'Hata: Personel verisi henüz yüklenmedi.' });
       return;
     }
 
     if (!branchData) {
-      showNotification('error', 'Hata: Şube verisi bulunamadı. Lütfen yöneticinizle iletişime geçin.');
+      setNotification({ type: 'error', message: 'Hata: Şube verisi bulunamadı. Lütfen yöneticinizle iletişime geçin.' });
       return;
     }
 
+    setNotification({ type: 'success', message: `DEBUG: ${action === 'check-in' ? 'Giriş' : 'Çıkış'} butonuna basıldı` });
+
     setActionLoading(true);
-    showNotification('success', 'Giriş butonuna basıldı');
-    setTimeout(() => showNotification('success', 'Konum izni kontrol ediliyor...'), 200);
+    setNotification({ type: 'success', message: 'DEBUG: Konum izni kontrol ediliyor...' });
 
     try {
+      // Request location permission before opening scanner
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
@@ -584,15 +592,14 @@ export default function EmployeeDashboard() {
         });
       });
 
-      console.log('LOCATION ACQUIRED:', position.coords);
+      setNotification({ type: 'success', message: 'DEBUG: Konum alındı, kamera açılıyor...' });
+      
       setLastPosition(position);
-
-      showNotification('success', 'Konum alındı, kamera açılıyor...');
-
       setQrAction(action);
       setIsQRScannerOpen(true);
       setActionLoading(false);
 
+      // Initialize scanner in next tick
       setTimeout(() => {
         const html5QrCode = new Html5Qrcode('qr-reader');
         html5QrCodeRef.current = html5QrCode;
@@ -609,38 +616,33 @@ export default function EmployeeDashboard() {
               await handleQRScan(decodedText);
             },
             () => {
-              // parse error ignore
+              // ignore parse errors
             }
           )
           .catch((scannerErr) => {
             console.error('Kamera başlatılamadı:', scannerErr);
             let errorMsg = 'Kamera başlatılamadı. Lütfen kamera izinlerini kontrol edin.';
-
-            if (scannerErr?.name === 'NotAllowedError') {
+            if (scannerErr.name === 'NotAllowedError') {
               errorMsg = 'Kamera izni reddedildi. Lütfen tarayıcı ayarlarından kamera izni verin.';
-            } else if (scannerErr?.name === 'NotFoundError') {
+            } else if (scannerErr.name === 'NotFoundError') {
               errorMsg = 'Cihazda kamera bulunamadı.';
             }
-
-            showNotification('error', errorMsg);
+            setNotification({
+              type: 'error',
+              message: errorMsg,
+            });
             setIsQRScannerOpen(false);
             setQrAction(null);
           });
-      }, 150);
+      }, 100);
     } catch (err: any) {
       console.error('Location error before scan:', err);
       setActionLoading(false);
-
       let msg = 'Konum izni gereklidir. Lütfen tarayıcı ayarlarından izin verin.';
-      if (err?.code === 1) {
-        msg = 'Konum izni reddedildi. Lütfen tarayıcı ayarlarından izin verin.';
-      } else if (err?.code === 2) {
-        msg = 'Konum bilgisi alınamadı. Lütfen GPS’in açık olduğundan emin olun.';
-      } else if (err?.code === 3) {
-        msg = 'Konum alma zaman aşımına uğradı. Lütfen GPS’in açık olduğundan emin olun.';
+      if (err.code === 3) {
+        msg = 'Konum alma zaman aşımına uğradı. Lütfen GPS\'in açık olduğundan emin olun.';
       }
-
-      showNotification('error', msg);
+      setNotification({ type: 'error', message: msg });
     }
   };
 
@@ -889,10 +891,10 @@ export default function EmployeeDashboard() {
       <AnimatePresence>
         {notification && (
           <motion.div
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 30 }}
-            className="fixed left-4 right-4 bottom-28 z-[110]"
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-24 left-4 right-4 z-[110]"
           >
             <div
               className={cn(
