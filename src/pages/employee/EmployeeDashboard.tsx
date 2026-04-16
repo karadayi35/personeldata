@@ -329,46 +329,7 @@ export default function EmployeeDashboard() {
     }
   };
 
-  const handleTestAttendanceWrite = async () => {
-    alert("Test attendance yazısı başlatıldı");
-    if (!employeeData || !branchData) {
-      alert("Hata: Employee veya Branch verisi eksik. Önce verilerin yüklenmesini bekleyin.");
-      return;
-    }
-
-    try {
-      const todayStr = format(new Date(), 'yyyy-MM-dd');
-      alert("Test kaydı Firestore'a yazılmak üzere hazırlanıyor...");
-      
-      const docRef = await addDoc(collection(db, 'attendance_records'), {
-        employeeId: employeeData.id,
-        employeeName: employeeData.name || '',
-        authUid: user?.uid || null,
-        branchId: branchData.id,
-        branchName: branchData.name || '',
-        date: todayStr,
-        checkIn: serverTimestamp(),
-        checkOut: null,
-        method: 'TEST',
-        status: 'working',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      
-      alert("SUCCESS: attendance kaydı oluşturuldu! ID: " + docRef.id);
-      setNotification({ type: 'success', message: 'Test kaydı başarıyla oluşturuldu.' });
-    } catch (error: any) {
-      console.error("Test write error:", error);
-      alert("attendance write hatası: " + error.message);
-      setNotification({ type: 'error', message: "Test yazma hatası: " + error.message });
-    }
-  };
-
   const processCheckIn = async () => {
-    alert("processCheckIn başladı");
-    setNotification({ type: 'success', message: 'DEBUG: processCheckIn başladı' });
-    console.log('DEBUG: processCheckIn started');
-
     if (!branchData || !employeeData) {
       setNotification({ type: 'error', message: 'Hata: Personel veya şube verisi eksik.' });
       return;
@@ -377,11 +338,9 @@ export default function EmployeeDashboard() {
     setActionLoading(true);
 
     try {
-      // Use lastPosition if available, otherwise fetch again
       let position = lastPosition;
 
       if (!position) {
-        setNotification({ type: 'success', message: 'DEBUG: Konum yeniden isteniyor...' });
         position = await new Promise<GeolocationPosition>((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
             enableHighAccuracy: true,
@@ -393,24 +352,13 @@ export default function EmployeeDashboard() {
 
       const { latitude, longitude } = position.coords;
 
-      if (
-        typeof branchData.lat !== 'number' ||
-        typeof branchData.lng !== 'number'
-      ) {
+      if (typeof branchData.lat !== 'number' || typeof branchData.lng !== 'number') {
         setNotification({ type: 'error', message: 'Şube konum bilgileri eksik.' });
         return;
       }
 
       const distance = calculateDistance(latitude, longitude, branchData.lat, branchData.lng);
       const allowedRadius = branchData.radius || 100;
-
-      console.log('DEBUG Check-in:', {
-        branchId: branchData.id,
-        distance,
-        allowedRadius,
-        latitude,
-        longitude
-      });
 
       if (distance > allowedRadius) {
         setNotification({
@@ -420,48 +368,46 @@ export default function EmployeeDashboard() {
         return;
       }
 
-      setNotification({ type: 'success', message: 'DEBUG: Konum doğrulandı' });
-
       const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-      setNotification({ type: 'success', message: 'DEBUG: attendance kaydı yazılıyor' });
-      console.log('DEBUG: attendance kaydı yazılıyor to attendance_records');
-      alert("attendance yazılıyor");
+      // Check for existing active record
+      const activeQ = query(
+        collection(db, 'attendance_records'),
+        where('employeeId', '==', employeeData.id),
+        where('date', '==', todayStr),
+        where('status', '==', 'working')
+      );
 
-      let docRef;
-      try {
-        docRef = await addDoc(collection(db, 'attendance_records'), {
-          employeeId: employeeData.id,
-          employeeName: employeeData.name || '',
-          authUid: user?.uid || null,
-          branchId: branchData.id,
-          branchName: branchData.name || '',
-          date: todayStr,
-          checkIn: serverTimestamp(),
-          checkOut: null,
-          method: 'QR',
-          location: {
-            lat: latitude,
-            lng: longitude,
-            isWithinRadius: true,
-            distance: Math.round(distance),
-          },
-          status: 'working',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+      const activeSnap = await getDocs(activeQ);
+
+      if (!activeSnap.empty) {
+        setNotification({
+          type: 'error',
+          message: 'Zaten aktif bir mesai kaydınız var.',
         });
-        alert("attendance yazıldı");
-        setNotification({ type: 'success', message: 'DEBUG: attendance kaydı oluşturuldu' });
-        console.log('DEBUG: attendance kaydı oluşturuldu, ID:', docRef.id);
-      } catch (firestoreError: any) {
-        console.error('CRITICAL: Firestore write hatası:', firestoreError);
-        setNotification({ 
-          type: 'error', 
-          message: `Firestore write hatası: ${firestoreError.message || 'Yetki hatası veya ağ sorunu'}` 
-        });
-        handleFirestoreError(firestoreError, OperationType.CREATE, 'attendance_records');
         return;
       }
+
+      const docRef = await addDoc(collection(db, 'attendance_records'), {
+        employeeId: employeeData.id,
+        employeeName: employeeData.name || '',
+        authUid: user?.uid || null,
+        branchId: branchData.id,
+        branchName: branchData.name || '',
+        date: todayStr,
+        checkIn: serverTimestamp(),
+        checkOut: null,
+        method: 'QR',
+        location: {
+          lat: latitude,
+          lng: longitude,
+          isWithinRadius: true,
+          distance: Math.round(distance),
+        },
+        status: 'working',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
 
       setStatus('working');
       setCurrentRecordId(docRef.id);
@@ -473,55 +419,53 @@ export default function EmployeeDashboard() {
 
       setTimeout(() => {
         navigate('/mobile/records');
-      }, 1200);
+      }, 1500);
     } catch (checkInError: any) {
       console.error('Check-in error:', checkInError);
-
-      let msg = `Giriş işlemi başarısız oldu. (Kod: ${checkInError?.code || 'vok'}, Mesaj: ${checkInError?.message || 'vok'})`;
-      if (checkInError?.code === 1) {
-        msg = `Konum hatası: code 1. Lütfen tarayıcı ayarlarından konum izni verin.`;
-      } else if (checkInError?.code === 2) {
-        msg = `Konum hatası: code 2. Konum alınamadı.`;
-      } else if (checkInError?.code === 3) {
-        msg = `Konum hatası: code 3. Konum alma zaman aşımına uğradı.`;
-      }
-
-      setNotification({ type: 'error', message: msg });
+      setNotification({
+        type: 'error',
+        message: checkInError.message || 'Giriş işlemi başarısız oldu.',
+      });
     } finally {
       setActionLoading(false);
     }
   };
 
   const processCheckOut = async () => {
-    setNotification({ type: 'success', message: 'DEBUG: processCheckOut başladı' });
-    if (!currentRecordId) {
-      setNotification({ type: 'error', message: 'Hata: Aktif çalışma kaydı bulunamadı.' });
+    if (!employeeData) {
+      setNotification({ type: 'error', message: 'Personel verisi eksik.' });
       return;
     }
 
     setActionLoading(true);
 
     try {
-      const docRef = doc(db, 'attendance_records', currentRecordId);
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-      setNotification({ type: 'success', message: 'DEBUG: attendance kaydı güncelleniyor' });
-      
-      try {
-        await updateDoc(docRef, {
-          checkOut: serverTimestamp(),
-          status: 'completed',
-          updatedAt: serverTimestamp(),
+      const q = query(
+        collection(db, 'attendance_records'),
+        where('employeeId', '==', employeeData.id),
+        where('date', '==', todayStr),
+        where('status', '==', 'working')
+      );
+
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) {
+        setNotification({
+          type: 'error',
+          message: 'Açık mesai kaydı bulunamadı.',
         });
-        setNotification({ type: 'success', message: 'DEBUG: attendance kaydı güncellendi' });
-      } catch (firestoreError: any) {
-        console.error('CRITICAL: Firestore update hatası:', firestoreError);
-        setNotification({ 
-          type: 'error', 
-          message: `Firestore update hatası: ${firestoreError.message || 'Yetki hatası veya ağ sorunu'}` 
-        });
-        handleFirestoreError(firestoreError, OperationType.UPDATE, `attendance_records/${currentRecordId}`);
         return;
       }
+
+      const activeDoc = snapshot.docs[0];
+
+      await updateDoc(doc(db, 'attendance_records', activeDoc.id), {
+        checkOut: serverTimestamp(),
+        status: 'completed',
+        updatedAt: serverTimestamp(),
+      });
 
       setStatus('idle');
       setCurrentRecordId(null);
@@ -533,12 +477,12 @@ export default function EmployeeDashboard() {
 
       setTimeout(() => {
         navigate('/mobile/records');
-      }, 1200);
-    } catch (checkOutError: any) {
-      console.error('Check-out error:', checkOutError);
+      }, 1500);
+    } catch (error: any) {
+      console.error('Check-out error:', error);
       setNotification({
         type: 'error',
-        message: `Çıkış hatası: ${checkOutError.message || 'İşlem başarısız oldu.'}`,
+        message: `Çıkış hatası: ${error.message || 'İşlem başarısız oldu.'}`,
       });
     } finally {
       setActionLoading(false);
@@ -549,11 +493,7 @@ export default function EmployeeDashboard() {
     if (scanLockRef.current) return;
     scanLockRef.current = true;
 
-    console.log('DEBUG QR Scan:', {
-      branchId: branchData?.id,
-      decodedText
-    });
-    setNotification({ type: 'success', message: 'DEBUG: QR okundu' });
+    setNotification({ type: 'success', message: 'QR okundu' });
 
     if (!branchData) {
       setNotification({ type: 'error', message: 'Hata: Şube verisi yüklenemedi. Lütfen sayfayı yenileyin.' });
@@ -566,12 +506,17 @@ export default function EmployeeDashboard() {
       ? decodedText.split('/').filter(Boolean).pop()
       : decodedText.trim();
 
-    console.log('DEBUG QR Parse:', { scannedId });
+    // Check against multiple possible branch fields
+    const isMatched = 
+      scannedId === branchData.id || 
+      scannedId === branchData.qrCode || 
+      scannedId === branchData.code || 
+      scannedId === branchData.branchCode;
 
-    if (scannedId !== branchData.id) {
+    if (!isMatched) {
       setNotification({
         type: 'error',
-        message: `Hata: Yanlış şube QR kodu! (Okunan: ${scannedId}, Beklenen: ${branchData.id})`,
+        message: 'Yanlış şube QR kodu! Lütfen kendi şubenizin kodunu okutun.',
       });
       await closeScanner();
       setTimeout(() => {
@@ -582,7 +527,7 @@ export default function EmployeeDashboard() {
 
     setNotification({
       type: 'success',
-      message: 'DEBUG: QR doğrulandı, işlem başlatılıyor...',
+      message: 'QR doğrulandı, işlem başlatılıyor...',
     });
 
     if (navigator.vibrate) {
@@ -592,10 +537,8 @@ export default function EmployeeDashboard() {
     await closeScanner();
 
     if (qrAction === 'check-in') {
-      setNotification({ type: 'success', message: 'DEBUG: Check-in işlemi başlatılıyor' });
       await processCheckIn();
     } else if (qrAction === 'check-out') {
-      setNotification({ type: 'success', message: 'DEBUG: Check-out işlemi başlatılıyor' });
       await processCheckOut();
     }
 
@@ -611,14 +554,12 @@ export default function EmployeeDashboard() {
     }
 
     if (!branchData) {
-      setNotification({ type: 'error', message: 'Hata: Şube verisi bulunamadı. Lütfen yöneticinizle iletişime geçin.' });
+      setNotification({ type: 'error', message: 'Hata: Şube verisi bulunamadı.' });
       return;
     }
 
-    setNotification({ type: 'success', message: `DEBUG: ${action === 'check-in' ? 'Giriş' : 'Çıkış'} butonuna basıldı` });
-
     setActionLoading(true);
-    setNotification({ type: 'success', message: 'DEBUG: Konum izni kontrol ediliyor...' });
+    setNotification({ type: 'success', message: 'Konum izni kontrol ediliyor...' });
 
     try {
       // Request location permission before opening scanner
@@ -630,7 +571,7 @@ export default function EmployeeDashboard() {
         });
       });
 
-      setNotification({ type: 'success', message: 'DEBUG: Konum alındı, kamera açılıyor...' });
+      setNotification({ type: 'success', message: 'Konum alındı, kamera açılıyor...' });
       
       setLastPosition(position);
       setQrAction(action);
@@ -716,17 +657,6 @@ export default function EmployeeDashboard() {
 
   return (
     <div className="px-4 py-6 space-y-6">
-      {/* Test Button Section */}
-      <div className="p-4 bg-orange-50 border border-orange-200 rounded-3xl flex flex-col gap-2">
-        <p className="text-[10px] font-bold text-orange-600 uppercase tracking-widest text-center">DEBUG MOD: TEST ALANI</p>
-        <button
-          onClick={handleTestAttendanceWrite}
-          className="w-full py-3 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-600/20 active:scale-95 transition-transform"
-        >
-          TEST ATTENDANCE YAZ
-        </button>
-      </div>
-
       <div className="relative overflow-hidden bg-gradient-to-br from-whatsapp-500 to-whatsapp-600 rounded-[2.5rem] p-8 text-white shadow-xl shadow-whatsapp-600/20">
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" />
         <div className="relative z-10 space-y-6">
