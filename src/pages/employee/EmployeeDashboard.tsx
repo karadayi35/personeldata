@@ -88,9 +88,11 @@ export default function EmployeeDashboard() {
   const [recentRecords, setRecentRecords] = useState<AttendanceRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<NotificationState>(null);
+  const [lastPosition, setLastPosition] = useState<GeolocationPosition | null>(null);
 
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const branchUnsubscribeRef = useRef<(() => void) | null>(null);
+  const scanLockRef = useRef(false);
 
   useEffect(() => {
     if (!notification) return;
@@ -336,13 +338,18 @@ export default function EmployeeDashboard() {
     setActionLoading(true);
 
     try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0,
+      // Use lastPosition if available, otherwise fetch again
+      let position = lastPosition;
+
+      if (!position) {
+        position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0,
+          });
         });
-      });
+      }
 
       const { latitude, longitude } = position.coords;
 
@@ -459,11 +466,15 @@ export default function EmployeeDashboard() {
   };
 
   const handleQRScan = async (decodedText: string) => {
+    if (scanLockRef.current) return;
+    scanLockRef.current = true;
+
     console.log('QR Scanned:', decodedText);
 
     if (!branchData) {
       setNotification({ type: 'error', message: 'Hata: Şube verisi yüklenemedi. Lütfen sayfayı yenileyin.' });
       await closeScanner();
+      scanLockRef.current = false;
       return;
     }
 
@@ -477,8 +488,16 @@ export default function EmployeeDashboard() {
         message: 'Hata: Yanlış şube QR kodu! Lütfen kendi şubenizin kodunu okutun.',
       });
       await closeScanner();
+      setTimeout(() => {
+        scanLockRef.current = false;
+      }, 1500);
       return;
     }
+
+    setNotification({
+      type: 'success',
+      message: 'QR doğrulandı, işlem başlatılıyor...',
+    });
 
     if (navigator.vibrate) {
       navigator.vibrate(200);
@@ -491,9 +510,13 @@ export default function EmployeeDashboard() {
     } else if (qrAction === 'check-out') {
       await processCheckOut();
     }
+
+    setTimeout(() => {
+      scanLockRef.current = false;
+    }, 1500);
   };
 
-  const startScanner = (action: 'check-in' | 'check-out') => {
+  const startScanner = async (action: 'check-in' | 'check-out') => {
     if (!employeeData) {
       setNotification({ type: 'error', message: 'Hata: Personel verisi henüz yüklenmedi.' });
       return;
@@ -504,38 +527,69 @@ export default function EmployeeDashboard() {
       return;
     }
 
-    setQrAction(action);
-    setIsQRScannerOpen(true);
+    setActionLoading(true);
+    setNotification({ type: 'success', message: 'Konum doğrulanıyor...' });
 
-    setTimeout(() => {
-      const html5QrCode = new Html5Qrcode('qr-reader');
-      html5QrCodeRef.current = html5QrCode;
-
-      html5QrCode
-        .start(
-          { facingMode: 'environment' },
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0,
-          },
-          async (decodedText: string) => {
-            await handleQRScan(decodedText);
-          },
-          () => {
-            // ignore parse errors
-          }
-        )
-        .catch((scannerErr) => {
-          console.error('Kamera başlatılamadı:', scannerErr);
-          setNotification({
-            type: 'error',
-            message: 'Kamera başlatılamadı. Lütfen kamera izinlerini kontrol edin.',
-          });
-          setIsQRScannerOpen(false);
-          setQrAction(null);
+    try {
+      // Request location permission before opening scanner
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
         });
-    }, 100);
+      });
+
+      setLastPosition(position);
+      setQrAction(action);
+      setIsQRScannerOpen(true);
+      setActionLoading(false);
+
+      // Initialize scanner in next tick
+      setTimeout(() => {
+        const html5QrCode = new Html5Qrcode('qr-reader');
+        html5QrCodeRef.current = html5QrCode;
+
+        html5QrCode
+          .start(
+            { facingMode: 'environment' },
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 },
+              aspectRatio: 1.0,
+            },
+            async (decodedText: string) => {
+              await handleQRScan(decodedText);
+            },
+            () => {
+              // ignore parse errors
+            }
+          )
+          .catch((scannerErr) => {
+            console.error('Kamera başlatılamadı:', scannerErr);
+            let errorMsg = 'Kamera başlatılamadı. Lütfen kamera izinlerini kontrol edin.';
+            if (scannerErr.name === 'NotAllowedError') {
+              errorMsg = 'Kamera izni reddedildi. Lütfen tarayıcı ayarlarından kamera izni verin.';
+            } else if (scannerErr.name === 'NotFoundError') {
+              errorMsg = 'Cihazda kamera bulunamadı.';
+            }
+            setNotification({
+              type: 'error',
+              message: errorMsg,
+            });
+            setIsQRScannerOpen(false);
+            setQrAction(null);
+          });
+      }, 100);
+    } catch (err: any) {
+      console.error('Location error before scan:', err);
+      setActionLoading(false);
+      let msg = 'Konum izni gereklidir. Lütfen tarayıcı ayarlarından izin verin.';
+      if (err.code === 3) {
+        msg = 'Konum alma zaman aşımına uğradı. Lütfen GPS\'in açık olduğundan emin olun.';
+      }
+      setNotification({ type: 'error', message: msg });
+    }
   };
 
   if (loading) {
