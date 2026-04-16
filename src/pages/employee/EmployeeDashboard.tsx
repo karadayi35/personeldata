@@ -326,8 +326,8 @@ export default function EmployeeDashboard() {
     } finally {
       html5QrCodeRef.current = null;
       setIsQRScannerOpen(false);
-      setQrAction(null);
-      qrActionRef.current = null;
+      // setQrAction is not called here to avoid UI flickering 
+      // before processing starts, and qrActionRef is cleared in handleQRScan
     }
   };
 
@@ -491,9 +491,10 @@ export default function EmployeeDashboard() {
     }
   };
 
-  const handleQRScan = async (decodedText: string) => {
+  const handleQRScan = async (decodedText: string, actionOverride?: 'check-in' | 'check-out') => {
     alert("handleQRScan başladı: " + decodedText);
-    console.log("handleQRScan başladı", decodedText);
+    if (actionOverride) alert("Action Override (Closure): " + actionOverride);
+    console.log("handleQRScan başladı", decodedText, actionOverride);
 
     if (scanLockRef.current) {
       console.log("Scan lock aktif, işlem iptal edildi.");
@@ -555,8 +556,8 @@ export default function EmployeeDashboard() {
 
     await closeScanner();
 
-    const action = qrActionRef.current;
-    alert("Action (Ref): " + action);
+    const action = actionOverride || qrActionRef.current;
+    alert("Action (Param/Ref): " + action);
 
     if (action === 'check-in') {
       alert("processCheckIn çağrılıyor");
@@ -565,15 +566,22 @@ export default function EmployeeDashboard() {
       alert("processCheckOut çağrılıyor");
       await processCheckOut();
     } else {
-      alert("qrAction (Ref) boş geldi! Stale state sorunu devam ediyor olabilir.");
+      alert("qrAction (Ref/Param) boş geldi! Stale state sorunu devam ediyor olabilir.");
     }
 
     setTimeout(() => {
       scanLockRef.current = false;
+      qrActionRef.current = null;
+      setQrAction(null);
     }, 1500);
   };
 
   const startScanner = async (action: 'check-in' | 'check-out') => {
+    alert("Scanner action set: " + action);
+    qrActionRef.current = action;
+    setQrAction(action);
+    console.log("Scanner action set:", action);
+
     if (!employeeData) {
       setNotification({ type: 'error', message: 'Hata: Personel verisi henüz yüklenmedi.' });
       return;
@@ -600,8 +608,6 @@ export default function EmployeeDashboard() {
       setNotification({ type: 'success', message: 'Konum alındı, kamera açılıyor...' });
       
       setLastPosition(position);
-      setQrAction(action);
-      qrActionRef.current = action;
       setIsQRScannerOpen(true);
       setActionLoading(false);
 
@@ -622,7 +628,7 @@ export default function EmployeeDashboard() {
             async (decodedText: string) => {
               alert("QR callback çalıştı: " + decodedText);
               console.log("QR callback çalıştı:", decodedText);
-              await handleQRScan(decodedText);
+              await handleQRScan(decodedText, action);
             },
             () => {
               // ignore parse errors
