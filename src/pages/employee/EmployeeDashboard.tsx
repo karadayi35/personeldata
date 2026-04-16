@@ -1,4 +1,4 @@
- import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Clock,
   Calendar,
@@ -490,7 +490,9 @@ export default function EmployeeDashboard() {
   };
 
   const handleQRScan = async (decodedText: string) => {
-    alert("handleQRScan tetiklendi: " + decodedText);
+    alert("handleQRScan başladı: " + decodedText);
+    console.log("handleQRScan başladı", decodedText);
+
     if (scanLockRef.current) {
       console.log("Scan lock aktif, işlem iptal edildi.");
       return;
@@ -500,6 +502,7 @@ export default function EmployeeDashboard() {
     setNotification({ type: 'success', message: 'QR okundu' });
 
     if (!branchData) {
+      alert("Hata: branchData bulunamadı (null/undefined)");
       setNotification({ type: 'error', message: 'Hata: Şube verisi yüklenemedi. Lütfen sayfayı yenileyin.' });
       await closeScanner();
       scanLockRef.current = false;
@@ -510,6 +513,8 @@ export default function EmployeeDashboard() {
       ? decodedText.split('/').filter(Boolean).pop()
       : decodedText.trim();
 
+    alert("normalize sonrası: " + scannedId);
+
     // Check against multiple possible branch fields
     const isMatched = 
       scannedId === branchData.id || 
@@ -517,7 +522,14 @@ export default function EmployeeDashboard() {
       scannedId === branchData.code || 
       scannedId === branchData.branchCode;
 
+    alert(
+      "Beklenen (ID): " + branchData.id + 
+      "\nOkunan: " + scannedId + 
+      "\nEşleşme: " + isMatched
+    );
+
     if (!isMatched) {
+      alert("Hata: QR kod eşleşmedi!");
       setNotification({
         type: 'error',
         message: 'Yanlış şube QR kodu! Lütfen kendi şubenizin kodunu okutun.',
@@ -529,6 +541,7 @@ export default function EmployeeDashboard() {
       return;
     }
 
+    alert("QR doğrulandı");
     setNotification({
       type: 'success',
       message: 'QR doğrulandı, işlem başlatılıyor...',
@@ -540,9 +553,13 @@ export default function EmployeeDashboard() {
 
     await closeScanner();
 
+    alert("qrAction: " + qrAction);
+
     if (qrAction === 'check-in') {
+      alert("processCheckIn çağrılıyor");
       await processCheckIn();
     } else if (qrAction === 'check-out') {
+      alert("processCheckOut çağrılıyor");
       await processCheckOut();
     }
 
