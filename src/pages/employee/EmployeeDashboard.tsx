@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+ import React, { useState, useEffect, useRef } from 'react';
 import {
   Clock,
   Calendar,
@@ -490,7 +490,11 @@ export default function EmployeeDashboard() {
   };
 
   const handleQRScan = async (decodedText: string) => {
-    if (scanLockRef.current) return;
+    alert("handleQRScan tetiklendi: " + decodedText);
+    if (scanLockRef.current) {
+      console.log("Scan lock aktif, işlem iptal edildi.");
+      return;
+    }
     scanLockRef.current = true;
 
     setNotification({ type: 'success', message: 'QR okundu' });
@@ -587,11 +591,14 @@ export default function EmployeeDashboard() {
           .start(
             { facingMode: 'environment' },
             {
-              fps: 10,
-              qrbox: { width: 250, height: 250 },
+              fps: 5,
+              qrbox: { width: 220, height: 220 },
               aspectRatio: 1.0,
+              disableFlip: false,
             },
             async (decodedText: string) => {
+              alert("QR callback çalıştı: " + decodedText);
+              console.log("QR callback çalıştı:", decodedText);
               await handleQRScan(decodedText);
             },
             () => {
