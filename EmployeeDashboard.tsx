@@ -88,11 +88,9 @@ export default function EmployeeDashboard() {
   const [recentRecords, setRecentRecords] = useState<AttendanceRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<NotificationState>(null);
-  const [lastPosition, setLastPosition] = useState<GeolocationPosition | null>(null);
 
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const branchUnsubscribeRef = useRef<(() => void) | null>(null);
-  const scanLockRef = useRef(false);
 
   useEffect(() => {
     if (!notification) return;
@@ -338,19 +336,13 @@ export default function EmployeeDashboard() {
     setActionLoading(true);
 
     try {
-      // Use lastPosition if available, otherwise fetch again
-      let position = lastPosition;
-
-      if (!position) {
-        setNotification({ type: 'success', message: 'DEBUG: Konum yeniden isteniyor...' });
-        position = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 0,
-          });
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
         });
-      }
+      });
 
       const { latitude, longitude } = position.coords;
 
@@ -365,14 +357,6 @@ export default function EmployeeDashboard() {
       const distance = calculateDistance(latitude, longitude, branchData.lat, branchData.lng);
       const allowedRadius = branchData.radius || 100;
 
-      console.log('DEBUG Check-in:', {
-        branchId: branchData.id,
-        distance,
-        allowedRadius,
-        latitude,
-        longitude
-      });
-
       if (distance > allowedRadius) {
         setNotification({
           type: 'error',
@@ -381,11 +365,7 @@ export default function EmployeeDashboard() {
         return;
       }
 
-      setNotification({ type: 'success', message: 'DEBUG: Konum doğrulandı' });
-
       const todayStr = format(new Date(), 'yyyy-MM-dd');
-
-      setNotification({ type: 'success', message: 'DEBUG: Kayıt Firestore\'a yazılıyor' });
 
       const docRef = await addDoc(collection(db, 'attendance_records'), {
         employeeId: employeeData.id,
@@ -422,13 +402,15 @@ export default function EmployeeDashboard() {
     } catch (checkInError: any) {
       console.error('Check-in error:', checkInError);
 
-      let msg = `Giriş işlemi başarısız oldu. (Kod: ${checkInError?.code || 'vok'}, Mesaj: ${checkInError?.message || 'vok'})`;
+      let msg = 'Giriş işlemi başarısız oldu.';
       if (checkInError?.code === 1) {
-        msg = `Konum hatası: code 1. Lütfen tarayıcı ayarlarından konum izni verin.`;
+        msg = 'Hata: Konum izni reddedildi. Lütfen tarayıcı ayarlarından konum izni verin.';
       } else if (checkInError?.code === 2) {
-        msg = `Konum hatası: code 2. Konum alınamadı.`;
+        msg = 'Hata: Konum alınamadı. Lütfen tekrar deneyin.';
       } else if (checkInError?.code === 3) {
-        msg = `Konum hatası: code 3. Konum alma zaman aşımına uğradı.`;
+        msg = 'Hata: Konum alma zaman aşımına uğradı.';
+      } else if (checkInError?.message) {
+        msg = `Hata: ${checkInError.message}`;
       }
 
       setNotification({ type: 'error', message: msg });
@@ -477,19 +459,11 @@ export default function EmployeeDashboard() {
   };
 
   const handleQRScan = async (decodedText: string) => {
-    if (scanLockRef.current) return;
-    scanLockRef.current = true;
-
-    console.log('DEBUG QR Scan:', {
-      branchId: branchData?.id,
-      decodedText
-    });
-    setNotification({ type: 'success', message: 'DEBUG: QR okundu' });
+    console.log('QR Scanned:', decodedText);
 
     if (!branchData) {
       setNotification({ type: 'error', message: 'Hata: Şube verisi yüklenemedi. Lütfen sayfayı yenileyin.' });
       await closeScanner();
-      scanLockRef.current = false;
       return;
     }
 
@@ -497,24 +471,14 @@ export default function EmployeeDashboard() {
       ? decodedText.split('/').filter(Boolean).pop()
       : decodedText.trim();
 
-    console.log('DEBUG QR Parse:', { scannedId });
-
     if (scannedId !== branchData.id) {
       setNotification({
         type: 'error',
-        message: `Hata: Yanlış şube QR kodu! (Okunan: ${scannedId}, Beklenen: ${branchData.id})`,
+        message: 'Hata: Yanlış şube QR kodu! Lütfen kendi şubenizin kodunu okutun.',
       });
       await closeScanner();
-      setTimeout(() => {
-        scanLockRef.current = false;
-      }, 1500);
       return;
     }
-
-    setNotification({
-      type: 'success',
-      message: 'DEBUG: QR doğrulandı, işlem başlatılıyor...',
-    });
 
     if (navigator.vibrate) {
       navigator.vibrate(200);
@@ -523,19 +487,13 @@ export default function EmployeeDashboard() {
     await closeScanner();
 
     if (qrAction === 'check-in') {
-      setNotification({ type: 'success', message: 'DEBUG: Check-in işlemi başlatılıyor' });
       await processCheckIn();
     } else if (qrAction === 'check-out') {
-      setNotification({ type: 'success', message: 'DEBUG: Check-out işlemi başlatılıyor' });
       await processCheckOut();
     }
-
-    setTimeout(() => {
-      scanLockRef.current = false;
-    }, 1500);
   };
 
-  const startScanner = async (action: 'check-in' | 'check-out') => {
+  const startScanner = (action: 'check-in' | 'check-out') => {
     if (!employeeData) {
       setNotification({ type: 'error', message: 'Hata: Personel verisi henüz yüklenmedi.' });
       return;
@@ -546,73 +504,38 @@ export default function EmployeeDashboard() {
       return;
     }
 
-    setNotification({ type: 'success', message: `DEBUG: ${action === 'check-in' ? 'Giriş' : 'Çıkış'} butonuna basıldı` });
+    setQrAction(action);
+    setIsQRScannerOpen(true);
 
-    setActionLoading(true);
-    setNotification({ type: 'success', message: 'DEBUG: Konum izni kontrol ediliyor...' });
+    setTimeout(() => {
+      const html5QrCode = new Html5Qrcode('qr-reader');
+      html5QrCodeRef.current = html5QrCode;
 
-    try {
-      // Request location permission before opening scanner
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0,
-        });
-      });
-
-      setNotification({ type: 'success', message: 'DEBUG: Konum alındı, kamera açılıyor...' });
-      
-      setLastPosition(position);
-      setQrAction(action);
-      setIsQRScannerOpen(true);
-      setActionLoading(false);
-
-      // Initialize scanner in next tick
-      setTimeout(() => {
-        const html5QrCode = new Html5Qrcode('qr-reader');
-        html5QrCodeRef.current = html5QrCode;
-
-        html5QrCode
-          .start(
-            { facingMode: 'environment' },
-            {
-              fps: 10,
-              qrbox: { width: 250, height: 250 },
-              aspectRatio: 1.0,
-            },
-            async (decodedText: string) => {
-              await handleQRScan(decodedText);
-            },
-            () => {
-              // ignore parse errors
-            }
-          )
-          .catch((scannerErr) => {
-            console.error('Kamera başlatılamadı:', scannerErr);
-            let errorMsg = 'Kamera başlatılamadı. Lütfen kamera izinlerini kontrol edin.';
-            if (scannerErr.name === 'NotAllowedError') {
-              errorMsg = 'Kamera izni reddedildi. Lütfen tarayıcı ayarlarından kamera izni verin.';
-            } else if (scannerErr.name === 'NotFoundError') {
-              errorMsg = 'Cihazda kamera bulunamadı.';
-            }
-            setNotification({
-              type: 'error',
-              message: errorMsg,
-            });
-            setIsQRScannerOpen(false);
-            setQrAction(null);
+      html5QrCode
+        .start(
+          { facingMode: 'environment' },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+          },
+          async (decodedText: string) => {
+            await handleQRScan(decodedText);
+          },
+          () => {
+            // ignore parse errors
+          }
+        )
+        .catch((scannerErr) => {
+          console.error('Kamera başlatılamadı:', scannerErr);
+          setNotification({
+            type: 'error',
+            message: 'Kamera başlatılamadı. Lütfen kamera izinlerini kontrol edin.',
           });
-      }, 100);
-    } catch (err: any) {
-      console.error('Location error before scan:', err);
-      setActionLoading(false);
-      let msg = 'Konum izni gereklidir. Lütfen tarayıcı ayarlarından izin verin.';
-      if (err.code === 3) {
-        msg = 'Konum alma zaman aşımına uğradı. Lütfen GPS\'in açık olduğundan emin olun.';
-      }
-      setNotification({ type: 'error', message: msg });
-    }
+          setIsQRScannerOpen(false);
+          setQrAction(null);
+        });
+    }, 100);
   };
 
   if (loading) {
