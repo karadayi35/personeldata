@@ -93,6 +93,7 @@ export default function EmployeeDashboard() {
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
   const branchUnsubscribeRef = useRef<(() => void) | null>(null);
   const scanLockRef = useRef(false);
+  const qrActionRef = useRef<'check-in' | 'check-out' | null>(null);
 
   useEffect(() => {
     if (!notification) return;
@@ -326,6 +327,7 @@ export default function EmployeeDashboard() {
       html5QrCodeRef.current = null;
       setIsQRScannerOpen(false);
       setQrAction(null);
+      qrActionRef.current = null;
     }
   };
 
@@ -553,14 +555,17 @@ export default function EmployeeDashboard() {
 
     await closeScanner();
 
-    alert("qrAction: " + qrAction);
+    const action = qrActionRef.current;
+    alert("Action (Ref): " + action);
 
-    if (qrAction === 'check-in') {
+    if (action === 'check-in') {
       alert("processCheckIn çağrılıyor");
       await processCheckIn();
-    } else if (qrAction === 'check-out') {
+    } else if (action === 'check-out') {
       alert("processCheckOut çağrılıyor");
       await processCheckOut();
+    } else {
+      alert("qrAction (Ref) boş geldi! Stale state sorunu devam ediyor olabilir.");
     }
 
     setTimeout(() => {
@@ -596,6 +601,7 @@ export default function EmployeeDashboard() {
       
       setLastPosition(position);
       setQrAction(action);
+      qrActionRef.current = action;
       setIsQRScannerOpen(true);
       setActionLoading(false);
 
