@@ -462,10 +462,18 @@ export default function EmployeeDashboard() {
       }
 
       const activeDoc = snapshot.docs[0];
+      const activeData = activeDoc.data();
+      const checkInTime = activeData.checkIn instanceof Timestamp 
+        ? activeData.checkIn.toDate().getTime() 
+        : Date.now();
+      
+      const checkOutTime = Date.now();
+      const workedMinutes = Math.round((checkOutTime - checkInTime) / (1000 * 60));
 
       await updateDoc(doc(db, 'attendance_records', activeDoc.id), {
         checkOut: serverTimestamp(),
         status: 'completed',
+        workedMinutes,
         updatedAt: serverTimestamp(),
       });
 
@@ -492,12 +500,7 @@ export default function EmployeeDashboard() {
   };
 
   const handleQRScan = async (decodedText: string, actionOverride?: 'check-in' | 'check-out') => {
-    alert("handleQRScan başladı: " + decodedText);
-    if (actionOverride) alert("Action Override (Closure): " + actionOverride);
-    console.log("handleQRScan başladı", decodedText, actionOverride);
-
     if (scanLockRef.current) {
-      console.log("Scan lock aktif, işlem iptal edildi.");
       return;
     }
     scanLockRef.current = true;
@@ -505,7 +508,6 @@ export default function EmployeeDashboard() {
     setNotification({ type: 'success', message: 'QR okundu' });
 
     if (!branchData) {
-      alert("Hata: branchData bulunamadı (null/undefined)");
       setNotification({ type: 'error', message: 'Hata: Şube verisi yüklenemedi. Lütfen sayfayı yenileyin.' });
       await closeScanner();
       scanLockRef.current = false;
@@ -516,8 +518,6 @@ export default function EmployeeDashboard() {
       ? decodedText.split('/').filter(Boolean).pop()
       : decodedText.trim();
 
-    alert("normalize sonrası: " + scannedId);
-
     // Check against multiple possible branch fields
     const isMatched = 
       scannedId === branchData.id || 
@@ -525,14 +525,7 @@ export default function EmployeeDashboard() {
       scannedId === branchData.code || 
       scannedId === branchData.branchCode;
 
-    alert(
-      "Beklenen (ID): " + branchData.id + 
-      "\nOkunan: " + scannedId + 
-      "\nEşleşme: " + isMatched
-    );
-
     if (!isMatched) {
-      alert("Hata: QR kod eşleşmedi!");
       setNotification({
         type: 'error',
         message: 'Yanlış şube QR kodu! Lütfen kendi şubenizin kodunu okutun.',
@@ -544,7 +537,6 @@ export default function EmployeeDashboard() {
       return;
     }
 
-    alert("QR doğrulandı");
     setNotification({
       type: 'success',
       message: 'QR doğrulandı, işlem başlatılıyor...',
@@ -557,16 +549,11 @@ export default function EmployeeDashboard() {
     await closeScanner();
 
     const action = actionOverride || qrActionRef.current;
-    alert("Action (Param/Ref): " + action);
 
     if (action === 'check-in') {
-      alert("processCheckIn çağrılıyor");
       await processCheckIn();
     } else if (action === 'check-out') {
-      alert("processCheckOut çağrılıyor");
       await processCheckOut();
-    } else {
-      alert("qrAction (Ref/Param) boş geldi! Stale state sorunu devam ediyor olabilir.");
     }
 
     setTimeout(() => {
@@ -577,10 +564,8 @@ export default function EmployeeDashboard() {
   };
 
   const startScanner = async (action: 'check-in' | 'check-out') => {
-    alert("Scanner action set: " + action);
     qrActionRef.current = action;
     setQrAction(action);
-    console.log("Scanner action set:", action);
 
     if (!employeeData) {
       setNotification({ type: 'error', message: 'Hata: Personel verisi henüz yüklenmedi.' });
@@ -626,8 +611,6 @@ export default function EmployeeDashboard() {
               disableFlip: false,
             },
             async (decodedText: string) => {
-              alert("QR callback çalıştı: " + decodedText);
-              console.log("QR callback çalıştı:", decodedText);
               await handleQRScan(decodedText, action);
             },
             () => {

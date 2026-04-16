@@ -191,6 +191,20 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "role"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Kullanıcı bildirimleri",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "type": { "type": "string", "enum": ["shift_reminder", "system", "announcement"] },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "body", "type", "isRead", "createdAt"]
     }
   },
   "firestore": {
@@ -241,6 +255,10 @@
     "users": {
       "schema": "User",
       "description": "Sistem kullanıcıları ve rolleri"
+    },
+    "notifications": {
+      "schema": "Notification",
+      "description": "Kullanıcı bildirimleri"
     }
   }
 }
