@@ -26,13 +26,23 @@ import {
 import { tr } from 'date-fns/locale';
 
 export default function EmployeeSchedule() {
-  const [user] = useState(auth.currentUser);
+  const [user, setUser] = useState(auth.currentUser);
   const [loading, setLoading] = useState(true);
   const [currentWeekStart, setCurrentWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [assignments, setAssignments] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
   const [overrides, setOverrides] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = auth.onAuthStateChanged((u) => {
+      setUser(u);
+      if (!u && !loading) {
+        setError("Lütfen giriş yapın.");
+      }
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -42,34 +52,90 @@ export default function EmployeeSchedule() {
       setError(null);
       try {
         // First find the employee document
-        const qEmp = query(collection(db, 'employees'), where('authUid', '==', user.uid));
-        const snapEmp = await getDocs(qEmp);
-        
-        if (snapEmp.empty) {
-          console.warn("Employee record not found for UID:", user.uid);
-          setError("Personel kaydınız bulunamadı.");
-          setLoading(false);
-          return;
+        let employeeId = '';
+        try {
+          console.log("Fetching employee for UID:", user.uid);
+          const qEmp = query(collection(db, 'employees'), where('authUid', '==', user.uid));
+          const snapEmp = await getDocs(qEmp);
+          
+          if (snapEmp.empty) {
+            console.warn("Employee record not found for UID:", user.uid);
+            setError("Personel kaydınız bulunamadı (authUid: " + user.uid + ")");
+            setLoading(false);
+            return;
+          }
+          employeeId = snapEmp.docs[0].id;
+          console.log("DEBUG: SUCCESSFULLY found Employee ID:", employeeId);
+        } catch (e: any) {
+          console.error("Error fetching employee doc:", e);
+          throw new Error(`Personel kaydı sorgulanırken hata oluştu [employees]: ${e.message}`);
         }
 
-        const employeeId = snapEmp.docs[0].id;
-
         // Fetch assignments
-        const qAss = query(collection(db, 'employee_shift_assignments'), where('employeeId', '==', employeeId), where('isActive', '==', true));
-        const snapAss = await getDocs(qAss);
-        setAssignments(snapAss.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        try {
+          console.log("DEBUG: Fetching assignments - Using employeeId:", employeeId);
+          console.log("DEBUG: Also checking if assignments exist for authUid:", user.uid);
+          
+          const qAss = query(collection(db, 'employee_shift_assignments'), where('employeeId', '==', employeeId), where('isActive', '==', true));
+          const snapAss = await getDocs(qAss);
+          
+          if (snapAss.empty) {
+            console.log("DEBUG: No assignments found for Employee ID. Trying Auth UID fallback...");
+            const qAssFallback = query(collection(db, 'employee_shift_assignments'), where('employeeId', '==', user.uid), where('isActive', '==', true));
+            const snapAssFallback = await getDocs(qAssFallback);
+            if (!snapAssFallback.empty) {
+              console.log("DEBUG: FOUND assignments using Auth UID instead of Employee ID!");
+              setAssignments(snapAssFallback.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            } else {
+              setAssignments([]);
+            }
+          } else {
+            setAssignments(snapAss.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          }
+          console.log("DEBUG: SUCCESSFULLY processed assignments.");
+        } catch (e: any) {
+          console.error("Error fetching employee_shift_assignments:", e);
+          throw new Error(`Vardiya atamaları alınamadı [employee_shift_assignments]: ${e.message}`);
+        }
 
         // Fetch shifts
-        const snapShifts = await getDocs(collection(db, 'shifts'));
-        setShifts(snapShifts.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        try {
+          console.log("Fetching all shifts");
+          const snapShifts = await getDocs(collection(db, 'shifts'));
+          setShifts(snapShifts.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          console.log("DEBUG: SUCCESSFULLY fetched shifts:", snapShifts.docs.length);
+        } catch (e: any) {
+          console.error("Error fetching shifts:", e);
+          throw new Error(`Vardiya tanımları alınamadı [shifts]: ${e.message}`);
+        }
 
         // Fetch overrides
-        const qOver = query(collection(db, 'shift_overrides'), where('employeeId', '==', user.uid));
-        const snapOver = await getDocs(qOver);
-        setOverrides(snapOver.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        try {
+          console.log("DEBUG: Fetching overrides - Using employeeId:", employeeId);
+          const qOver = query(collection(db, 'shift_overrides'), where('employeeId', '==', employeeId));
+          const snapOver = await getDocs(qOver);
+          
+          if (snapOver.empty) {
+            console.log("DEBUG: No overrides found for Employee ID. Trying Auth UID fallback...");
+            const qOverFallback = query(collection(db, 'shift_overrides'), where('employeeId', '==', user.uid));
+            const snapOverFallback = await getDocs(qOverFallback);
+            if (!snapOverFallback.empty) {
+              console.log("DEBUG: FOUND overrides using Auth UID instead of Employee ID!");
+              setOverrides(snapOverFallback.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            } else {
+              setOverrides([]);
+            }
+          } else {
+            setOverrides(snapOver.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          }
+          console.log("DEBUG: SUCCESSFULLY processed overrides.");
+        } catch (e: any) {
+          console.error("Error fetching shift_overrides:", e);
+          throw new Error(`Vardiya değişiklikleri alınamadı [shift_overrides]: ${e.message}`);
+        }
       } catch (err: any) {
         console.error('Error fetching schedule:', err);
-        setError(`Çalışma planı yüklenirken hata oluştu: ${err.message}`);
+        setError(err.message || 'Çalışma planı yüklenirken bir hata oluştu.');
       } finally {
         setLoading(false);
       }

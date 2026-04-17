@@ -2,9 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -25,9 +22,10 @@ service cloud.firestore {
 
     function isEmployeeOwner(data) {
       return isAuthenticated() && (
-        (data.authUid == request.auth.uid) ||
-        (data.employeeId == request.auth.uid) ||
+        (data.authUid != null && data.authUid == request.auth.uid) ||
+        (data.employeeId != null && data.employeeId == request.auth.uid) ||
         (
+          data.employeeId != null &&
           exists(/databases/$(database)/documents/employees/$(data.employeeId)) &&
           get(/databases/$(database)/documents/employees/$(data.employeeId)).data.authUid == request.auth.uid
         )
@@ -38,9 +36,6 @@ service cloud.firestore {
       return val is string && val.size() <= maxLen;
     }
 
-    // ===============================================================
-    // Users Collection
-    // ===============================================================
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       allow create: if isAdmin() || (isOwner(userId) && request.resource.data.role == 'employee');
@@ -48,9 +43,6 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ===============================================================
-    // Employees Collection
-    // ===============================================================
     match /employees/{employeeId} {
       allow read: if isAdmin() || (isAuthenticated() && resource.data.authUid == request.auth.uid);
       allow create: if isAdmin();
@@ -69,188 +61,91 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ===============================================================
-    // Attendance Records
-    // ===============================================================
     match /attendance_records/{recordId} {
-      allow read: if isAdmin() || (
-        isAuthenticated() &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow read: if isAdmin() || isEmployeeOwner(resource.data);
       allow create: if isAuthenticated();
-      allow update: if isAdmin() || (
-        isAuthenticated() &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow update: if isAdmin() || isEmployeeOwner(resource.data);
       allow delete: if isAdmin();
     }
 
-    // ===============================================================
-    // Branches
-    // ===============================================================
     match /branches/{branchId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Shifts
-    // ===============================================================
     match /shifts/{shiftId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Employee Shift Assignments
-    // ===============================================================
     match /employee_shift_assignments/{assignmentId} {
-      allow read: if isAdmin() || (
-        isAuthenticated() &&
-        resource.data.employeeId != null &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow read: if isAdmin() || isEmployeeOwner(resource.data);
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Shift Overrides
-    // ===============================================================
     match /shift_overrides/{overrideId} {
-      allow read: if isAdmin() || (
-        isAuthenticated() &&
-        resource.data.employeeId != null &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow read: if isAdmin() || isEmployeeOwner(resource.data);
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Work Schedules
-    // ===============================================================
     match /work_schedules/{scheduleId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Holidays
-    // ===============================================================
     match /holidays/{holidayId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Announcements
-    // ===============================================================
     match /announcements/{announcementId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Leave Requests
-    // ===============================================================
     match /leave_requests/{requestId} {
-      allow read: if isAdmin() || (
-        isAuthenticated() &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow read: if isAdmin() || isEmployeeOwner(resource.data);
       allow create: if isAuthenticated();
-      allow update: if isAdmin() || (
-        isAuthenticated() &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow update: if isAdmin() || isEmployeeOwner(resource.data);
       allow delete: if isAdmin();
     }
 
-    // ===============================================================
-    // Leave Records
-    // ===============================================================
     match /leave_records/{recordId} {
-      allow read: if isAdmin() || (
-        isAuthenticated() &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow read: if isAdmin() || isEmployeeOwner(resource.data);
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Break Records
-    // ===============================================================
     match /break_records/{recordId} {
-      allow read: if isAdmin() || (
-        isAuthenticated() &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow read: if isAdmin() || isEmployeeOwner(resource.data);
       allow create: if isAuthenticated();
-      allow update: if isAdmin() || (
-        isAuthenticated() &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow update: if isAdmin() || isEmployeeOwner(resource.data);
       allow delete: if isAdmin();
     }
 
-    // ===============================================================
-    // Leave Balances
-    // ===============================================================
     match /leave_balances/{balanceId} {
-      allow read: if isAdmin() || (
-        isAuthenticated() &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow read: if isAdmin() || isEmployeeOwner(resource.data);
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Settings
-    // ===============================================================
     match /settings/{settingId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Email Logs
-    // ===============================================================
     match /email_logs/{logId} {
       allow read: if isAdmin();
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Salary Configs
-    // ===============================================================
     match /salary_configs/{configId} {
       allow read, write: if isAdmin();
     }
 
-    // ===============================================================
-    // Salary Records
-    // ===============================================================
     match /salary_records/{recordId} {
-      allow read: if isAdmin() || (
-        isAuthenticated() &&
-        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) &&
-        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
-      );
+      allow read: if isAdmin() || isEmployeeOwner(resource.data);
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Notifications
-    // ===============================================================
     match /notifications/{notificationId} {
       allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
       allow update: if isAuthenticated() &&
@@ -259,17 +154,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // Notification Logs
-    // ===============================================================
     match /notification_logs/{logId} {
       allow read: if isAdmin();
       allow write: if isAdmin();
     }
 
-    // ===============================================================
-    // System Settings
-    // ===============================================================
     match /system_settings/{settingId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();

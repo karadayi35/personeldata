@@ -1,10 +1,11 @@
-import express from "express";
+ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
 import { Resend } from "resend";
 import dotenv from "dotenv";
 import admin from "firebase-admin";
+import { getFirestore } from "firebase-admin/firestore";
 import { fileURLToPath } from "url";
 import { format, addMinutes, parseISO, isValid } from "date-fns";
 
@@ -176,89 +177,126 @@ async function startServer() {
    * Bildirim Gönderme Mantığı
    */
   async function checkAndSendShiftReminders() {
-    const dbId = process.env.FIREBASE_DATABASE_ID || "ai-studio-90f319b6-1ccf-4f41-8793-86588c46c0c6";
-    const db = admin.firestore(); // Default assumes correct DB in this environment
+    let dbId = process.env.FIREBASE_DATABASE_ID;
     
-    // 1. Ayarları Getir
-    const settingsDoc = await db.collection('settings').doc('global').get();
-    const globalSettings = settingsDoc.exists ? settingsDoc.data() : {};
+    // Fallback to config file if env var is missing
+    if (!dbId) {
+      try {
+        const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+        if (fs.existsSync(configPath)) {
+          const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+          dbId = config.firestoreDatabaseId;
+        }
+      } catch (e) {
+        console.warn("Failed to read firebase-applet-config.json for dbId");
+      }
+    }
     
-    // Merge default notification settings if specifically needed or just use values from global
-    const settings = {
-      notificationEnabled: globalSettings?.shiftReminder?.enabled ?? true,
-      reminderMinutesBefore: globalSettings?.shiftReminder?.minutesBefore ?? 5,
-      reminderMessage: globalSettings?.shiftReminder?.message ?? "Lütfen işe giriş yapın. Vardiyanız {minutes} dakika sonra başlıyor."
-    };
-
-    if (!settings.notificationEnabled) return;
-
-    const now = new Date();
-    // Türkiye saati veya sistem saati (UTC+3)
-    // Bu sistemde UTC dönüyor olabilir, format'a dikkat
-    const todayStr = format(now, "yyyy-MM-dd");
-    const currentTimeStr = format(now, "HH:mm");
+    dbId = dbId || "(default)";
     
-    // Hatırlatma yapılacak zamanı hesapla (5 dk sonra başlayacak olanlar)
-    const reminderTarget = addMinutes(now, settings.reminderMinutesBefore);
-    const targetTimeStr = format(reminderTarget, "HH:mm");
-    const dayOfWeek = now.getDay();
-
-    // 2. Aktif personelleri getir
-    const employeesSnap = await db.collection('employees')
-      .where('status', '==', 'active')
-      .where('notificationsEnabled', '!=', false)
-      .get();
-
-    for (const empDoc of employeesSnap.docs) {
-      const employee = { id: empDoc.id, ...empDoc.data() } as any;
-      if (!employee.fcmToken) continue;
-
-      // 3. Bugünün vardiyasını bul
-      let shiftStart: string | null = null;
+    try {
+      console.log(`DEBUG: checkAndSendShiftReminders started for DB: ${dbId}`);
+      const db = getFirestore(admin.app(), dbId); 
       
-      // Önce Override kontrolü
-      const overrideSnap = await db.collection('shift_overrides')
-        .where('employeeId', '==', employee.id)
-        .where('date', '==', todayStr)
-        .limit(1)
-        .get();
+      // 1. Ayarları Getir
+      let globalSettings: any = {};
+      try {
+        const settingsDoc = await db.collection('settings').doc('global').get();
+        if (settingsDoc.exists) {
+          globalSettings = settingsDoc.data();
+        }
+      } catch (e) {
+        console.warn("Settings fetch failed or collection 'settings' not found. Using defaults.", e);
+      }
+      
+      // Merge default notification settings
+      const settings = {
+        notificationEnabled: globalSettings?.shiftReminder?.enabled ?? true,
+        reminderMinutesBefore: globalSettings?.shiftReminder?.minutesBefore ?? 5,
+        reminderMessage: globalSettings?.shiftReminder?.message ?? "Lütfen işe giriş yapın. Vardiyanız {minutes} dakika sonra başlıyor."
+      };
 
-      if (!overrideSnap.empty) {
-        const override = overrideSnap.docs[0].data();
-        if (override.overrideType === 'day_off') continue;
-        shiftStart = override.customStartTime || null;
+      if (!settings.notificationEnabled) {
+        console.log("DEBUG: Notifications disabled in settings.");
+        return;
       }
 
-      // Eğer override yoksa atamaya bak
-      if (!shiftStart) {
-        const assignmentsSnap = await db.collection('employee_shift_assignments')
+      const now = new Date();
+      const todayStr = format(now, "yyyy-MM-dd");
+      const reminderTarget = addMinutes(now, settings.reminderMinutesBefore);
+      const targetTimeStr = format(reminderTarget, "HH:mm");
+      const dayOfWeek = now.getDay();
+
+      console.log(`DEBUG: Target Time: ${targetTimeStr}, Today: ${todayStr}`);
+
+      // 2. Aktif personelleri getir
+      console.log("DEBUG: Fetching active employees...");
+      const employeesSnap = await db.collection('employees')
+        .where('status', '==', 'active')
+        .where('notificationsEnabled', '!=', false)
+        .get();
+      
+      console.log(`DEBUG: Found ${employeesSnap.docs.length} active employees with notifications enabled.`);
+
+      for (const empDoc of employeesSnap.docs) {
+        const employee = { id: empDoc.id, ...empDoc.data() } as any;
+        if (!employee.fcmToken) continue;
+
+        console.log(`DEBUG: Checking shift for employee: ${employee.name} (${employee.id})`);
+        
+        // 3. Bugünün vardiyasını bul
+        let shiftStart: string | null = null;
+        
+        // Önce Override kontrolü
+        const overrideSnap = await db.collection('shift_overrides')
           .where('employeeId', '==', employee.id)
-          .where('isActive', '==', true)
+          .where('date', '==', todayStr)
+          .limit(1)
           .get();
 
-        for (const assDoc of assignmentsSnap.docs) {
-          const ass = assDoc.data();
-          if (ass.startDate <= todayStr && (!ass.endDate || ass.endDate >= todayStr)) {
-            if (ass.activeDays && ass.activeDays.includes(dayOfWeek)) {
-              // Vardiya şablonunu getir
-              const shiftDoc = await db.collection('shifts').doc(ass.shiftId).get();
-              if (shiftDoc.exists) {
-                shiftStart = shiftDoc.data()?.startTime || null;
+        if (!overrideSnap.empty) {
+          const override = overrideSnap.docs[0].data();
+          if (override.overrideType === 'day_off') {
+            console.log(`DEBUG: Override found for ${employee.name}: Day Off`);
+            continue;
+          }
+          shiftStart = override.customStartTime || null;
+          if (shiftStart) console.log(`DEBUG: Override found for ${employee.name}: Custom Start ${shiftStart}`);
+        }
+
+        // Eğer override yoksa atamaya bak
+        if (!shiftStart) {
+          const assignmentsSnap = await db.collection('employee_shift_assignments')
+            .where('employeeId', '==', employee.id)
+            .where('isActive', '==', true)
+            .get();
+
+          for (const assDoc of assignmentsSnap.docs) {
+            const ass = assDoc.data();
+            if (ass.startDate <= todayStr && (!ass.endDate || ass.endDate >= todayStr)) {
+              if (ass.activeDays && ass.activeDays.includes(dayOfWeek)) {
+                // Vardiya şablonunu getir
+                const shiftDoc = await db.collection('shifts').doc(ass.shiftId).get();
+                if (shiftDoc.exists) {
+                  shiftStart = shiftDoc.data()?.startTime || null;
+                  if (shiftStart) console.log(`DEBUG: Assignment found for ${employee.name}: Shift Start ${shiftStart}`);
+                }
               }
             }
           }
         }
-      }
 
-      // 4. Zaman kontrolü
-      if (shiftStart === targetTimeStr) {
-        // Zaten gönderildi mi?
-        const logId = `${employee.id}_${todayStr}_${shiftStart}`;
-        const logDoc = await db.collection('notification_logs').doc(logId).get();
+        // 4. Zaman kontrolü
+        if (shiftStart === targetTimeStr) {
+          console.log(`DEBUG: MATCH! Sending notification to ${employee.name} for ${shiftStart}`);
+          
+          // Zaten gönderildi mi?
+          const logId = `${employee.id}_${todayStr}_${shiftStart}`;
+          const logDoc = await db.collection('notification_logs').doc(logId).get();
 
-        if (!logDoc.exists) {
-          // Bildirim Gönder
-          console.log(`Sending reminder to ${employee.name} for shift at ${shiftStart}`);
+          if (!logDoc.exists) {
+            // Bildirim Gönder
+            console.log(`Actually sending reminder to ${employee.name} for shift at ${shiftStart}`);
           
           const message = settings.reminderMessage.replace("{minutes}", String(settings.reminderMinutesBefore));
           
@@ -299,6 +337,10 @@ async function startServer() {
           }
         }
       }
+    }
+    } catch (err) {
+      console.error("ERROR in checkAndSendShiftReminders process:", err);
+      throw err;
     }
   }
 
