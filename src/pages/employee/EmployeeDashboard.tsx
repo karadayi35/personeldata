@@ -15,6 +15,8 @@ import {
 import { cn } from '@/lib/utils';
 import { auth, db, handleFirestoreError, OperationType } from '@/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { getToken } from 'firebase/messaging';
+import { messaging } from '@/firebase';
 import {
   collection,
   query,
@@ -28,6 +30,7 @@ import {
   orderBy,
   limit,
   Timestamp,
+  setDoc,
 } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -94,6 +97,36 @@ export default function EmployeeDashboard() {
   const branchUnsubscribeRef = useRef<(() => void) | null>(null);
   const scanLockRef = useRef(false);
   const qrActionRef = useRef<'check-in' | 'check-out' | null>(null);
+
+  useEffect(() => {
+    if (employeeData && employeeData.id && employeeData.notificationsEnabled !== false) {
+      const registerNotifications = async () => {
+        try {
+          const msg = await messaging();
+          if (!msg) return;
+
+          const permission = await Notification.requestPermission();
+          if (permission === 'granted') {
+            const token = await getToken(msg, {
+              vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY
+            });
+            
+            if (token && token !== employeeData.fcmToken) {
+              await updateDoc(doc(db, 'employees', employeeData.id), {
+                fcmToken: token,
+                updatedAt: serverTimestamp()
+              });
+              console.log('FCM Token registered successsfully');
+            }
+          }
+        } catch (error) {
+          console.error('Error registering push notifications:', error);
+        }
+      };
+      
+      registerNotifications();
+    }
+  }, [employeeData]);
 
   useEffect(() => {
     if (!notification) return;

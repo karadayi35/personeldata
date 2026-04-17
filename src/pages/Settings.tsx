@@ -23,6 +23,11 @@ export default function Settings() {
       checkIn: true,
       checkOut: true,
       late: true
+    },
+    shiftReminder: {
+      enabled: true,
+      minutesBefore: 5,
+      message: "Lütfen işe giriş yapın. Vardiyanız {minutes} dakika sonra başlıyor."
     }
   });
 
@@ -182,6 +187,60 @@ export default function Settings() {
                 </label>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Automatic Shift Reminder */}
+        <div className="bg-[#111b21] p-6 rounded-2xl border border-slate-800 space-y-6">
+          <div className="flex items-center gap-3 text-whatsapp-500">
+            <RefreshCw size={24} />
+            <h3 className="text-lg font-bold text-white">Vardiya Hatırlatma (Otomatik)</h3>
+          </div>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-200">Otomatik Hatırlatma</p>
+                <p className="text-xs text-slate-500">Vardiya öncesi personele bildirim gönder.</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  className="sr-only peer"
+                  checked={settings.shiftReminder?.enabled}
+                  onChange={(e) => setSettings({
+                    ...settings,
+                    shiftReminder: {
+                      ...settings.shiftReminder,
+                      enabled: e.target.checked
+                    }
+                  })}
+                />
+                <div className="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-whatsapp-600"></div>
+              </label>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-2">Kaç Dakika Önce?</label>
+              <input 
+                type="number"
+                value={settings.shiftReminder?.minutesBefore}
+                onChange={(e) => setSettings({ ...settings, shiftReminder: { ...settings.shiftReminder, minutesBefore: Number(e.target.value) }})}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl py-2.5 px-4 text-slate-200 focus:ring-2 focus:ring-whatsapp-500 outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-400 mb-2">Bildirim Metni</label>
+              <textarea 
+                value={settings.shiftReminder?.message}
+                onChange={(e) => setSettings({ ...settings, shiftReminder: { ...settings.shiftReminder, message: e.target.value }})}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl py-2.5 px-4 text-slate-200 focus:ring-2 focus:ring-whatsapp-500 outline-none h-24"
+                placeholder="Örn: Lütfen işe giriş yapın. Vardiyanız {minutes} dakika sonra başlıyor."
+              />
+              <p className="text-[10px] text-slate-500 mt-1 italic">
+                * {"{minutes}"} ifadesi otomatik olarak süre ile değiştirilir.
+              </p>
+            </div>
           </div>
         </div>
       </div>

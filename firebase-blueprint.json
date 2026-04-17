@@ -9,6 +9,7 @@
         "name": { "type": "string" },
         "email": { "type": "string", "format": "email" },
         "phone": { "type": "string" },
+        "authUid": { "type": "string" },
         "role": { "type": "string" },
         "department": { "type": "string" },
         "branchId": { "type": "string" },
@@ -17,6 +18,8 @@
         "mobileAccessActive": { "type": "boolean" },
         "mobileAccountCreated": { "type": "boolean" },
         "tempPassword": { "type": "string" },
+        "fcmToken": { "type": "string", "description": "Firebase Cloud Messaging Token" },
+        "notificationsEnabled": { "type": "boolean", "default": true },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "email", "role", "branchId", "status", "mobileAccessActive"]
@@ -205,6 +208,30 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "title", "body", "type", "isRead", "createdAt"]
+    },
+    "NotificationLog": {
+      "title": "Notification Log",
+      "description": "Gönderilen bildirimlerin kaydı",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "shiftStartTime": { "type": "string" },
+        "type": { "type": "string", "enum": ["shift_reminder"] },
+        "sentAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["sent", "failed"] }
+      },
+      "required": ["employeeId", "date", "shiftStartTime", "type", "sentAt"]
+    },
+    "SystemSettings": {
+      "title": "System Settings",
+      "description": "Genel sistem ayarları",
+      "type": "object",
+      "properties": {
+        "notificationEnabled": { "type": "boolean" },
+        "reminderMinutesBefore": { "type": "number" },
+        "reminderMessage": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -259,6 +286,14 @@
     "notifications": {
       "schema": "Notification",
       "description": "Kullanıcı bildirimleri"
+    },
+    "notification_logs": {
+      "schema": "NotificationLog",
+      "description": "Bildirim gönderim günlükleri"
+    },
+    "system_settings": {
+      "schema": "SystemSettings",
+      "description": "Sistem genel ayarları"
     }
   }
 }

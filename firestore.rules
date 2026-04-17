@@ -46,7 +46,7 @@ service cloud.firestore {
     match /employees/{employeeId} {
       allow read: if isAdmin() || (isAuthenticated() && resource.data.authUid == request.auth.uid);
       allow create: if isAdmin();
-      allow update: if isAdmin() || (isAuthenticated() && resource.data.authUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avatar', 'updatedAt', 'tempPassword']));
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.authUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avatar', 'updatedAt', 'tempPassword', 'fcmToken', 'notificationsEnabled']));
       allow delete: if isAdmin();
     }
 
@@ -74,13 +74,24 @@ service cloud.firestore {
 
     // Employee Shift Assignments
     match /employee_shift_assignments/{assignmentId} {
-      allow read: if isAdmin() || (isAuthenticated() && exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) && get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid);
+      // Allow read if user is admin OR the assignment's employeeId matches a document owned by the user
+      allow read: if isAdmin() || (
+        isAuthenticated() && 
+        resource.data.employeeId != null && 
+        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) && 
+        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
+      );
       allow write: if isAdmin();
     }
 
     // Shift Overrides
     match /shift_overrides/{overrideId} {
-      allow read: if isAdmin() || (isAuthenticated() && exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) && get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid);
+      allow read: if isAdmin() || (
+        isAuthenticated() && 
+        resource.data.employeeId != null && 
+        exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) && 
+        get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid
+      );
       allow write: if isAdmin();
     }
 
@@ -145,6 +156,25 @@ service cloud.firestore {
     
     match /salary_records/{recordId} {
       allow read: if isAdmin() || (isAuthenticated() && exists(/databases/$(database)/documents/employees/$(resource.data.employeeId)) && get(/databases/$(database)/documents/employees/$(resource.data.employeeId)).data.authUid == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+      allow write: if isAdmin();
+    }
+
+    // Notification Logs
+    match /notification_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // System Settings
+    match /system_settings/{settingId} {
+      allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
   }
