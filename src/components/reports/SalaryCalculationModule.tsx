@@ -372,8 +372,8 @@ export default function SalaryCalculationModule() {
               className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-4 text-slate-700 font-bold focus:ring-2 focus:ring-whatsapp-500 focus:bg-white outline-none transition-all appearance-none"
             >
               <option value="all">Tüm Şubeler</option>
-              {Array.from(new Set(employees.map(e => e.branchName))).map(b => (
-                <option key={b} value={b}>{b}</option>
+              {Array.from(new Set(employees.map(e => e.branchName).filter(Boolean))).map(b => (
+                <option key={`branch-${b}`} value={b as string}>{b as string}</option>
               ))}
             </select>
           </div>
@@ -593,7 +593,7 @@ export default function SalaryCalculationModule() {
                 >
                   <option value="">Seçiniz...</option>
                   {employees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.employeeCode})</option>
+                    <option key={emp.id || `emp-${Math.random()}`} value={emp.id}>{emp.name} ({emp.employeeCode})</option>
                   ))}
                 </select>
               </div>
